@@ -1,0 +1,6 @@
+[package]
+name = "redox-fatfs"
+version = "0.1.0"
+authors = ["Deepak Sirone <deepaksirone94@gmail.com>"]
+
+[dependencies]
