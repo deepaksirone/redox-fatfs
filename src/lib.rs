@@ -1,5 +1,6 @@
-
-pub struct BiosParameterBlock {
+/// The BIOS Parameter Block elements common to all types of FAT volumes
+#[derive(Clone, Copy)]
+pub struct BiosParameterBlockCommon {
     /// Jump instructions to boot code 
     /// BS_jmpBoot
     pub jmp_boot: [u8; 3],
@@ -35,16 +36,35 @@ pub struct BiosParameterBlock {
     pub sectors_per_track: u16,
     /// Number of heads
     /// BPB_NumHeads
-    pub number_of_heads: u16
+    pub number_of_heads: u16,
     /// Count of Hidden Sectors preceding this partition
     /// BPB_HiddSec
     pub hidden_sectors: u32,
     /// Total Sectors
     /// BPB_TotSec32
-    pub total_sectors_32: u32
+    pub total_sectors_32: u32,
+    /// Enum wrapping FAT specific struct
+    pub fat_type: FATType
 
 }
 
+#[derive(Copy, Clone)]
+pub enum FATType {
+    FAT32(BiosParameterBlockFAT32),
+    FATLegacy(BiosParameterBlockLegacy)
+}
+
+/// Bios Parameter Block for FAT12 and FAT16 volumes
+#[derive(Copy, Clone)]
+pub struct BiosParameterBlockLegacy {
+ 
+
+}
+
+#[derive(Copy, Clone)]
+pub struct BiosParameterBlockFAT32 {
+
+}
 pub struct File {
     pos: u64,
 }
