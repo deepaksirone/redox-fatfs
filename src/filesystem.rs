@@ -1,9 +1,14 @@
-use Disk;
+use std::io::{Read, Write, Seek};
+use BiosParameterBlock;
 
-pub struct FileSystem<D: Disk> {
+pub struct FileSystem<D: Read + Write + Seek> {
     pub disk: D,
-    pub bpb: 
+    pub bpb: BiosParameterBlock,
 }
 
-impl<D: Disk> FileSystem<D> {
-    
+impl<D: Read + Write + Seek> FileSystem<D> {
+
+    pub fn init(mut disk: D) -> FileSystem<D> {
+        unimplemented!();
+    }
+}

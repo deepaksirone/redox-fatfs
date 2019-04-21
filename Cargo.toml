@@ -7,3 +7,4 @@ authors = ["Deepak Sirone <deepaksirone94@gmail.com>"]
 spin = "0.4"
 redox_syscall = "0.1"
 uuid = { version = "0.5", features = ["v4"] }
+byteorder = { version = "1", default-features = false }

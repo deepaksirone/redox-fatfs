@@ -1,24 +1,29 @@
+use std::ops::{Deref, DerefMut};
+use std::io::{Read, Write, Seek};
+use std::default::Default;
+
 use Disk;
+use BLOCK_SIZE;
 
 /// The BIOS Parameter Block elements common to all types of FAT volumes
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct BiosParameterBlock {
-    /// Jump instructions to boot code 
+    /// Jump instructions to boot code
     /// BS_jmpBoot
     pub jmp_boot: [u8; 3],
-    /// Indicates the OS which formatted this volume 
+    /// Indicates the OS which formatted this volume
     /// BS_OEMName
     pub oem_name: [u8; 8],
-    /// Size of a sector 
+    /// Size of a sector
     /// BPB_BytsPerSec
     pub bytes_per_sector: u16,
-    /// Sectors per cluster 
+    /// Sectors per cluster
     /// BPB_SecPerClus
     pub sectors_per_cluster: u8,
     /// Reserved sectors count
     /// BPB_RsvdSecCnt
     pub rsvd_sec_cnt: u16,
-    /// Count of FAT data structures in the volume 
+    /// Count of FAT data structures in the volume
     /// BPB_NumFATs
     pub num_fats: u8,
     /// Count of 32-byte dir entries in root dir(Only for FAT12 and FAT16)
@@ -46,8 +51,9 @@ pub struct BiosParameterBlock {
     /// BPB_TotSec32
     pub total_sectors_32: u32,
     /// Enum wrapping FAT specific struct
-    pub fat_type: FATType
-
+    pub fat_type: FATType,
+    /// BootSignature
+    pub sig: [u8; 2]
 }
 
 #[derive(Copy, Clone)]
@@ -76,7 +82,9 @@ pub struct BiosParameterBlockLegacy {
     pub volume_label: [u8; 11],
     /// File System Type
     /// BS_FilSysType
-    pub file_sys_type: u32
+    pub file_sys_type: u32,
+    /// Boot Code
+    pub code : [u8; 452]
 }
 
 
@@ -84,7 +92,7 @@ pub struct BiosParameterBlockLegacy {
 pub struct BiosParameterBlockFAT32 {
     /// FAT32 Count of sectors occupied by one FAT
     /// BPB_FATSz32
-    pub fat_size: u32,     
+    pub fat_size: u32,
     /// Extended Flags
     /// BPB_ExtFlags
     /// Bits 0-3 -- Zero based number of active FAT
@@ -128,12 +136,43 @@ pub struct BiosParameterBlockFAT32 {
     pub volume_label: [u8; 11],
     /// File System type
     /// BS_FilSystype
-    pub file_sys_type: [u8; 8]
+    pub file_sys_type: [u8; 8],
+    /// Boot Code
+    pub code: [u8; 420]
 }
 
 impl BiosParameterBlock {
-    pub fn populate<D: Disk>(disk: &mut D) {
-        
+    pub fn populate<D: Read>(disk: &mut D) -> BiosParameterBlock {
+        let mut bpb : BiosParameterBlock = Default::default();
+        disk.read_exact(&mut bpb.jmp_boot);
+        disk.read_exact(&mut bpb.oem_name);
+        bpb
     }
 
+}
+
+impl Default for BiosParameterBlockLegacy {
+    fn default() -> Self {
+         BiosParameterBlockLegacy {
+             code: [0; 452],
+             ..Default::default()
+
+         }
+    }
+}
+
+impl Default for BiosParameterBlockFAT32 {
+    fn default() -> Self {
+        BiosParameterBlockFAT32 {
+            code: [0; 420],
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for FATType {
+    fn default() -> Self {
+        let f: BiosParameterBlockFAT32 = Default::default();
+        FATType::FAT32(f)
+    }
 }
