@@ -1,8 +1,10 @@
 use std::ops::{Deref, DerefMut};
 use std::io::{Read, Write, Seek};
 use std::default::Default;
+use super::Result;
 
-use Disk;
+use byteorder::{ReadBytesExt, LittleEndian};
+//use Disk;
 use BLOCK_SIZE;
 
 /// The BIOS Parameter Block elements common to all types of FAT volumes
@@ -59,7 +61,8 @@ pub struct BiosParameterBlock {
 #[derive(Copy, Clone)]
 pub enum FATType {
     FAT32(BiosParameterBlockFAT32),
-    FATLegacy(BiosParameterBlockLegacy)
+    FAT12(BiosParameterBlockLegacy),
+    FAT16(BiosParameterBlockLegacy)
 }
 
 /// Bios Parameter Block for FAT12 and FAT16 volumes
@@ -96,7 +99,7 @@ pub struct BiosParameterBlockFAT32 {
     /// Extended Flags
     /// BPB_ExtFlags
     /// Bits 0-3 -- Zero based number of active FAT
-    /// Only valid if mirroring is disabled
+    /// Only valid if mirroring iFAT32s disabled
     /// Bits 4-6 -- Reserved
     /// Bit 7 -- 0 means the FAT is mirrored at runtime into all FATs
     ///     -- 1 means only one FAT is active and is referenced by bits 0-3
@@ -142,12 +145,54 @@ pub struct BiosParameterBlockFAT32 {
 }
 
 impl BiosParameterBlock {
-    pub fn populate<D: Read>(disk: &mut D) -> BiosParameterBlock {
+    pub fn populate<D: Read>(disk: &mut D) -> Result<BiosParameterBlock> {
         let mut bpb : BiosParameterBlock = Default::default();
-        disk.read_exact(&mut bpb.jmp_boot);
-        disk.read_exact(&mut bpb.oem_name);
-        bpb
+        disk.read_exact(&mut bpb.jmp_boot)?;
+        disk.read_exact(&mut bpb.oem_name)?;
+        bpb.bytes_per_sector = disk.read_u16::<LittleEndian>()?;
+        bpb.sectors_per_cluster = disk.read_u8()?;
+        bpb.rsvd_sec_cnt = disk.read_u16::<LittleEndian>()?;
+        bpb.num_fats = disk.read_u8()?;
+        bpb.root_entries_cnt = disk.read_u16::<LittleEndian>()?;
+        bpb.total_sectors_16 = disk.read_u16::<LittleEndian>()?;
+        bpb.media = disk.read_u8()?;
+        bpb.fat_size_16 = disk.read_u16::<LittleEndian>()?;
+        bpb.sectors_per_track = disk.read_u16::<LittleEndian>()?;
+        bpb.number_of_heads = disk.read_u16::<LittleEndian>()?;
+        bpb.hidden_sectors = disk.read_u32::<LittleEndian>()?;
+        bpb.total_sectors_32 = disk.read_u32::<LittleEndian>()?;
+
+        let mut bpb32 = BiosParameterBlockFAT32::default();
+        bpb32.fat_size = disk.read_u32::<LittleEndian>()?;
+        bpb32.ext_flags = disk.read_u16::<LittleEndian>()?;
+        bpb32.fs_ver = disk.read_u16::<LittleEndian>()?;
+        bpb32.root_cluster = disk.read_u32::<LittleEndian>()?;
+        bpb32.fs_info = disk.read_u16::<LittleEndian>()?;
+        bpb32.bk_boot_sec = disk.read_u16::<LittleEndian>()?;
+        disk.read_exact(&mut bpb32.reserved);
+        bpb32.drv_num = disk.read_u8()?;
+        bpb32.reserved1 = disk.read_u8()?;
+        bpb32.boot_sig = disk.read_u8()?;
+        bpb32.vol_id = disk.read_u32::<LittleEndian>()?;
+        disk.read_exact(&mut bpb32.volume_label)?;
+        disk.read_exact(&mut bpb32.file_sys_type)?;
+        disk.read_exact(&mut bpb32.code)?;
+        disk.read_exact(&mut bpb.sig)?;
+
+        let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);
+        let fat_sz = if (bpb.fat_size_16 != 0) { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
+        let tot_sec = if (bpb.total_sectors_16 != 0) { bpb.total_sectors_16 as u32 } else { bpb.total_sectors_32 };
+        let data_sec = tot_sec - ((bpb.rsvd_sec_cnt as u32) + (bpb.num_fats as u32) * fat_sz + root_sectors);
+
+        let count_clusters = data_sec / (bpb.sectors_per_cluster as u32);
+        bpb.fat_type = if count_clusters < 4085 { FATType::FAT12(BiosParameterBlockLegacy::default()) }
+                       else if  count_clusters < 65525 { FATType::FAT16(BiosParameterBlockLegacy::default()) }
+                       else { FATType::FAT32(bpb32) };
+
+        Ok(bpb)
     }
+
+
 
 }
 
@@ -156,7 +201,6 @@ impl Default for BiosParameterBlockLegacy {
          BiosParameterBlockLegacy {
              code: [0; 452],
              ..Default::default()
-
          }
     }
 }
