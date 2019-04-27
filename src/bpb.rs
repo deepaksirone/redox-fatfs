@@ -186,13 +186,15 @@ impl BiosParameterBlock {
 
         let count_clusters = data_sec / (bpb.sectors_per_cluster as u32);
         bpb.fat_type = if count_clusters < 4085 { FATType::FAT12(BiosParameterBlockLegacy::default()) }
-                       else if  count_clusters < 65525 { FATType::FAT16(BiosParameterBlockLegacy::default()) }
+                       else if count_clusters < 65525 { FATType::FAT16(BiosParameterBlockLegacy::default()) }
                        else { FATType::FAT32(bpb32) };
 
         Ok(bpb)
     }
 
-
+    pub fn validate(&self) -> bool {
+        true
+    }
 
 }
 
