@@ -3,5 +3,9 @@ pub struct File {
     pub current_cluster : Option<u32>,
     pub filepath : Option<String>,
     pub offset : u32,
-    // FIXME: Add pointer to dirctory entry
+    // FIXME: Add pointer to directory entry
+}
+
+pub struct Dir {
+
 }

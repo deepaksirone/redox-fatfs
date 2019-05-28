@@ -7,6 +7,7 @@ use BiosParameterBlock;
 pub struct FileSystem<D: Read + Write + Seek> {
     pub disk: D,
     pub bpb: BiosParameterBlock,
+    pub partition_offset: u64,
 }
 
 impl<D: Read + Write + Seek> FileSystem<D> {
@@ -17,11 +18,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
         Ok(FileSystem {
             disk: disk,
-            bpb: bpb
+            bpb: bpb,
+            partition_offset: partition_offset
         })
     }
-
-    
 
 
 }
