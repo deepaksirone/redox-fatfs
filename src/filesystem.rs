@@ -124,6 +124,16 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         Ok(())
     }
 
+    fn cluster_iter<'a>(&'a mut self, start_cluster: Cluster) -> ClusterIter<'a, D> {
+        ClusterIter {
+            current_cluster: start_cluster,
+            fat_start_sector: self.bpb.rsvd_sec_cnt as u64,
+            bytes_per_sec: self.bpb.bytes_per_sector as u64,
+            fat_type: self.bpb.fat_type,
+            fs: self
+        }
+    }
+
 }
 
 
