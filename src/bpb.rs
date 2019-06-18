@@ -169,7 +169,7 @@ impl BiosParameterBlock {
         bpb32.root_cluster = disk.read_u32::<LittleEndian>()?;
         bpb32.fs_info = disk.read_u16::<LittleEndian>()?;
         bpb32.bk_boot_sec = disk.read_u16::<LittleEndian>()?;
-        disk.read_exact(&mut bpb32.reserved);
+        disk.read_exact(&mut bpb32.reserved)?;
         bpb32.drv_num = disk.read_u8()?;
         bpb32.reserved1 = disk.read_u8()?;
         bpb32.boot_sig = disk.read_u8()?;

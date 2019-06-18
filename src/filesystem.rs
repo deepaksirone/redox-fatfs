@@ -8,6 +8,7 @@ use std::iter::Iterator;
 use BiosParameterBlock;
 use disk::Disk;
 use bpb::FATType;
+use byteorder::{LittleEndian, ByteOrder};
 
 struct Cluster {
     cluster_number: u64,
@@ -35,7 +36,51 @@ impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
         let fat_sec_number = self.fat_start_sector + (fat_offset / self.bytes_per_sec);
         let fat_ent_offset = fat_offset % self.bytes_per_sec;
         let mut sectors: [u8; 8192] = [0; 2 * 4096];
-        unimplemented!()
+        self.fs.read_at(fat_sec_number * self.bytes_per_sec, &mut sectors[..((self.bytes_per_sec * 2) as usize)]);
+        match self.fat_type {
+            FATType::FAT12(_) => {
+                let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+                entry = if entry & 0x0001 == 1 { entry >> 4 }
+                        else { entry & 0x0fff };
+                // 0x0ff7 is the bad cluster mark and any cluster value >= 0x0ff8 means EOF
+                if entry >= 0x0ff7 {
+                    None
+                }
+                else {
+                    Some(Cluster {
+                        cluster_number: entry as u64,
+                        parent_cluster: Some(current_cluster)
+                    })
+                }
+            },
+            FATType::FAT16(_) => {
+
+                let entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+                // 0xfff7 is the bad cluster mark and any cluster value >= 0x0ff8 means EOF
+                if (entry >= 0xfff7) {
+                    None
+                }
+                else {
+                    Some(Cluster {
+                        cluster_number: entry as u64,
+                        parent_cluster: Some(current_cluster)
+                    })
+                }
+            },
+            FATType::FAT32(_) => {
+                let entry = LittleEndian::read_u32(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 4) as usize]) & 0x0FFFFFFF;
+                // 0x0ffffff7 is the bad cluster mark and any cluster value >= 0x0ffffff8 means EOF
+                if (entry >= 0x0FFFFFF7) {
+                    None
+                }
+                else {
+                    Some(Cluster {
+                        cluster_number: entry as u64,
+                        parent_cluster: Some(current_cluster)
+                    })
+                }
+            }
+        }
 
 
     }
