@@ -1,5 +1,8 @@
 #![crate_type="lib"]
 
+#[macro_use]
+extern crate log;
+
 extern crate syscall;
 extern crate byteorder;
 
@@ -11,3 +14,4 @@ pub use self::bpb::{BiosParameterBlock, BiosParameterBlockLegacy, BiosParameterB
 mod disk;
 mod bpb;
 mod filesystem;
+mod table;

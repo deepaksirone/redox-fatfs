@@ -8,3 +8,4 @@ spin = "0.4"
 redox_syscall = "0.1"
 uuid = { version = "0.5", features = ["v4"] }
 byteorder = "1"
+log = ""
