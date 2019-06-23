@@ -63,7 +63,7 @@ impl Fat {
                 else if entry == 0xfff7 {
                     FatEntry::Bad
                 }
-                else if (entry >= 0xfff8) {
+                else if entry >= 0xfff8 {
                     FatEntry::EndOfChain
                 }
                 else {
@@ -83,7 +83,10 @@ impl Fat {
                     },
                     0 => FatEntry::Unused,
                     0x0ffffff7 => FatEntry::Bad,
-                    0x0ffffff8...0x0fffffff => FatEntry::EndOfChain,
+                    0x0ffffff8...0x0fffffff => {
+                        println!("End of Chain");
+                        FatEntry::EndOfChain
+                    },
                     n => FatEntry::Next(Cluster {
                         cluster_number: entry as u64,
                         parent_cluster: cluster.cluster_number

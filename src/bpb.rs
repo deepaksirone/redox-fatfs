@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
-use std::io::{Read, Write, Seek};
+use std::io::{Read, Write, Seek, SeekFrom};
 use std::default::Default;
+use std::fmt;
 use super::Result;
 
 use byteorder::{ReadBytesExt, LittleEndian};
@@ -8,7 +9,8 @@ use byteorder::{ReadBytesExt, LittleEndian};
 use BLOCK_SIZE;
 
 /// The BIOS Parameter Block elements common to all types of FAT volumes
-#[derive(Default, Clone, Copy)]
+#[allow(dead_code)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct BiosParameterBlock {
     /// Jump instructions to boot code
     /// BS_jmpBoot
@@ -58,7 +60,7 @@ pub struct BiosParameterBlock {
     pub sig: [u8; 2]
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum FATType {
     FAT32(BiosParameterBlockFAT32),
     FAT12(BiosParameterBlockLegacy),
@@ -66,7 +68,7 @@ pub enum FATType {
 }
 
 /// Bios Parameter Block for FAT12 and FAT16 volumes
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct BiosParameterBlockLegacy {
     /// Drive number for BIOS INT 0x13
     /// BS_DrvNum
@@ -86,12 +88,12 @@ pub struct BiosParameterBlockLegacy {
     /// File System Type
     /// BS_FilSysType
     pub file_sys_type: u32,
-    /// Boot Code
-    pub code : [u8; 452]
+    //// Boot Code
+    //pub code : [u8; 452]
 }
 
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct BiosParameterBlockFAT32 {
     /// FAT32 Count of sectors occupied by one FAT
     /// BPB_FATSz32
@@ -140,13 +142,14 @@ pub struct BiosParameterBlockFAT32 {
     /// File System type
     /// BS_FilSystype
     pub file_sys_type: [u8; 8],
-    /// Boot Code
-    pub code: [u8; 420]
+    //// Boot Code
+    //pub code: [u8; 420]
 }
 
 impl BiosParameterBlock {
-    pub fn populate<D: Read>(disk: &mut D) -> Result<BiosParameterBlock> {
-        let mut bpb : BiosParameterBlock = Default::default();
+    pub fn populate<D: Read+Seek>(disk: &mut D) -> Result<BiosParameterBlock> {
+
+        let mut bpb  = BiosParameterBlock::default();
         disk.read_exact(&mut bpb.jmp_boot)?;
         disk.read_exact(&mut bpb.oem_name)?;
         bpb.bytes_per_sector = disk.read_u16::<LittleEndian>()?;
@@ -176,12 +179,13 @@ impl BiosParameterBlock {
         bpb32.vol_id = disk.read_u32::<LittleEndian>()?;
         disk.read_exact(&mut bpb32.volume_label)?;
         disk.read_exact(&mut bpb32.file_sys_type)?;
-        disk.read_exact(&mut bpb32.code)?;
+        //disk.read_exact(&mut bpb32.code)?;
+        disk.seek(SeekFrom::Current(420));
         disk.read_exact(&mut bpb.sig)?;
 
         let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);
-        let fat_sz = if (bpb.fat_size_16 != 0) { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
-        let tot_sec = if (bpb.total_sectors_16 != 0) { bpb.total_sectors_16 as u32 } else { bpb.total_sectors_32 };
+        let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
+        let tot_sec = if bpb.total_sectors_16 != 0 { bpb.total_sectors_16 as u32 } else { bpb.total_sectors_32 };
         let data_sec = tot_sec - ((bpb.rsvd_sec_cnt as u32) + (bpb.num_fats as u32) * fat_sz + root_sectors);
 
         let count_clusters = data_sec / (bpb.sectors_per_cluster as u32);
@@ -198,28 +202,71 @@ impl BiosParameterBlock {
     }
 
 }
-
+/*
+#[allow(dead_code)]
+impl Default for BiosParameterBlock {
+    fn default() -> Self {
+        BiosParameterBlock {
+            ..Default::default()
+        }
+    }
+}*/
+/*
+#[allow(dead_code)]
 impl Default for BiosParameterBlockLegacy {
     fn default() -> Self {
          BiosParameterBlockLegacy {
-             code: [0; 452],
+             //code: [0; 452],
              ..Default::default()
          }
     }
-}
-
+}*/
+/*
+#[allow(dead_code)]
 impl Default for BiosParameterBlockFAT32 {
     fn default() -> Self {
         BiosParameterBlockFAT32 {
-            code: [0; 420],
+            //code: [0; 420],
             ..Default::default()
         }
     }
 }
+*/
 
+#[allow(dead_code)]
 impl Default for FATType {
     fn default() -> Self {
-        let f: BiosParameterBlockFAT32 = Default::default();
+        let f = BiosParameterBlockFAT32::default();
         FATType::FAT32(f)
     }
+}
+
+#[allow(dead_code)]
+impl fmt::Debug for BiosParameterBlockFAT32 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BiosParameterBlockFAT32 {{\n
+                fat_size: {:?},\n
+                ext_flags: {:?},\n
+                fs_ver: {:?},\n
+                root_cluster: {:?},\n
+                fs_info: {:?}\n
+                 }}", self.fat_size, self.ext_flags,self.fs_ver, self.root_cluster, self.fs_info)
+    }
+}
+
+#[allow(dead_code)]
+impl fmt::Debug for BiosParameterBlockLegacy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BiosParameterBlockLegacy {{\n\
+            drive_num: {},\n\
+            reserved: {}, \n\
+            boot_sig: {}, \n\
+            vol_id: {}, \n\
+            file_sys_type: {}
+        }}", self.drive_num, self.reserved, self.boot_sig, self.vol_id, self.file_sys_type)
+    }
+}
+
+impl FATType {
+
 }

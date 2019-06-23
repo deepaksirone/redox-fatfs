@@ -10,15 +10,16 @@ use disk::Disk;
 use bpb::FATType;
 use table::{Fat, FatEntry};
 use byteorder::{LittleEndian, ByteOrder};
+use file::Dir;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Cluster {
     pub cluster_number: u64,
     pub parent_cluster: u64,
 }
 
 struct ClusterIter<'a, D: Read + Write + Seek> {
-    current_cluster: Cluster,
+    current_cluster: Option<Cluster>,
     fat_table: Fat,
     fs: &'a mut FileSystem<D>
 }
@@ -26,10 +27,21 @@ struct ClusterIter<'a, D: Read + Write + Seek> {
 impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
     type Item = Cluster;
     fn next(&mut self) -> Option<Self::Item> {
-        match self.fat_table.get_entry(self.fs, self.current_cluster) {
-            FatEntry::Next(c) => Some(c),
+        let ret = self.current_cluster;
+        let new = match self.current_cluster {
+            Some(c) => {
+                let entry = self.fat_table.get_entry(self.fs, c);
+                match entry {
+                    FatEntry::Next(c) => {
+                        Some(c)
+                    },
+                    _ => None
+                }
+            },
             _ => None
-        }
+        };
+        self.current_cluster = new;
+        ret
     }
 }
 
@@ -58,7 +70,18 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn read_cluster(&mut self, cluster: Cluster, buf: &mut [u8]) -> Result<usize> {
-        self.read_at(cluster.cluster_number, buf)
+        let root_dir_sec = ((self.bpb.root_entries_cnt as u64 * 32) + (self.bpb.bytes_per_sector as u64 - 1)) / (self.bpb.bytes_per_sector as u64);
+        let fat_sz = if self.bpb.fat_size_16 != 0 { self.bpb.fat_size_16 as u64}
+                         else {
+                            match self.bpb.fat_type {
+                                FATType::FAT32(x) => x.fat_size as u64,
+                                _ => panic!("FAT12 and FAT16 volumes should have non-zero BPB_FATSz16")
+                            }
+                         };
+        let first_data_sec = self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * fat_sz) + root_dir_sec;
+        let first_sec_cluster = (cluster.cluster_number - 2) * (self.bpb.sectors_per_cluster as u64) + first_data_sec;
+        println!("Read Cluster Offset = {:x}", first_sec_cluster * (self.bpb.bytes_per_sector as u64));
+        self.read_at(first_sec_cluster * (self.bpb.bytes_per_sector as u64), buf)
     }
 
     pub fn clusters(&mut self, start_cluster: Cluster) -> Vec<Cluster> {
@@ -82,7 +105,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
     fn cluster_iter(&mut self, start_cluster: Cluster) -> ClusterIter<D> {
         ClusterIter {
-            current_cluster: start_cluster,
+            current_cluster: Some(start_cluster),
             fat_table: Fat {
                 fat_type: self.bpb.fat_type
             },
@@ -92,6 +115,14 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
 }
 
+impl Cluster {
+    pub fn new(cluster: u64) -> Self {
+        Cluster {
+            cluster_number: cluster,
+            parent_cluster: 0
+        }
+    }
+}
 
 impl Default for Cluster {
     fn default() -> Self {
