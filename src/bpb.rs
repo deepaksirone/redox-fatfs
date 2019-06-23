@@ -202,36 +202,6 @@ impl BiosParameterBlock {
     }
 
 }
-/*
-#[allow(dead_code)]
-impl Default for BiosParameterBlock {
-    fn default() -> Self {
-        BiosParameterBlock {
-            ..Default::default()
-        }
-    }
-}*/
-/*
-#[allow(dead_code)]
-impl Default for BiosParameterBlockLegacy {
-    fn default() -> Self {
-         BiosParameterBlockLegacy {
-             //code: [0; 452],
-             ..Default::default()
-         }
-    }
-}*/
-/*
-#[allow(dead_code)]
-impl Default for BiosParameterBlockFAT32 {
-    fn default() -> Self {
-        BiosParameterBlockFAT32 {
-            //code: [0; 420],
-            ..Default::default()
-        }
-    }
-}
-*/
 
 #[allow(dead_code)]
 impl Default for FATType {
@@ -245,28 +215,30 @@ impl Default for FATType {
 impl fmt::Debug for BiosParameterBlockFAT32 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BiosParameterBlockFAT32 {{\n
-                fat_size: {:?},\n
-                ext_flags: {:?},\n
-                fs_ver: {:?},\n
-                root_cluster: {:?},\n
-                fs_info: {:?}\n
-                 }}", self.fat_size, self.ext_flags,self.fs_ver, self.root_cluster, self.fs_info)
+                fat_size: {:?},
+                ext_flags: {:?},
+                fs_ver: {:?},
+                root_cluster: {:?},
+                fs_info: {:?},
+                bk_boot_sec: {:?},
+                drv_num: {:?},
+                boot_sig: {:?},
+                vol_id: {:?},
+
+                 }}", self.fat_size, self.ext_flags,self.fs_ver, self.root_cluster, self.fs_info,
+                self.bk_boot_sec, self.drv_num, self.boot_sig, self.vol_id)
     }
 }
 
 #[allow(dead_code)]
 impl fmt::Debug for BiosParameterBlockLegacy {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BiosParameterBlockLegacy {{\n\
-            drive_num: {},\n\
-            reserved: {}, \n\
-            boot_sig: {}, \n\
-            vol_id: {}, \n\
+        write!(f, "BiosParameterBlockLegacy {{
+            drive_num: {},
+            reserved: {},
+            boot_sig: {},
+            vol_id: {},
             file_sys_type: {}
         }}", self.drive_num, self.reserved, self.boot_sig, self.vol_id, self.file_sys_type)
     }
-}
-
-impl FATType {
-
 }
