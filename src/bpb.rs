@@ -214,7 +214,7 @@ impl Default for FATType {
 #[allow(dead_code)]
 impl fmt::Debug for BiosParameterBlockFAT32 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BiosParameterBlockFAT32 {{\n
+        write!(f, "BiosParameterBlockFAT32 {{
                 fat_size: {:?},
                 ext_flags: {:?},
                 fs_ver: {:?},
@@ -223,8 +223,7 @@ impl fmt::Debug for BiosParameterBlockFAT32 {
                 bk_boot_sec: {:?},
                 drv_num: {:?},
                 boot_sig: {:?},
-                vol_id: {:?},
-
+                vol_id: {:?}
                  }}", self.fat_size, self.ext_flags,self.fs_ver, self.root_cluster, self.fs_info,
                 self.bk_boot_sec, self.drv_num, self.boot_sig, self.vol_id)
     }

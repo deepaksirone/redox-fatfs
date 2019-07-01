@@ -1,11 +1,12 @@
 use bpb::FATType;
 use super::Result;
 use std::io::{Read, Write, Seek, SeekFrom};
-use filesystem::{FileSystem, Cluster};
-use byteorder::{LittleEndian, ByteOrder};
+use filesystem::{FileSystem, Cluster, FsInfo};
+use byteorder::{LittleEndian, ByteOrder, ReadBytesExt};
 
+#[derive(Debug, Clone, Copy)]
 pub struct Fat {
-    pub fat_type: FATType
+    pub fat_type: FATType,
 }
 
 pub enum FatEntry {
@@ -16,7 +17,7 @@ pub enum FatEntry {
 }
 
 impl Fat {
-    pub fn get_entry<D: Read + Seek + Write>(&mut self, fs: &mut FileSystem<D>, cluster: Cluster) -> FatEntry {
+    pub fn get_entry<D: Read + Seek + Write>(&mut self, fs: &mut FileSystem<D>, cluster: Cluster) -> Result<FatEntry> {
         let current_cluster = cluster.cluster_number;
         let fat_offset = match self.fat_type {
             FATType::FAT12(_) => current_cluster + (current_cluster / 2),
@@ -29,12 +30,15 @@ impl Fat {
 
         let fat_sec_number = fat_start_sector + (fat_offset / bytes_per_sec);
         let fat_ent_offset = fat_offset % bytes_per_sec;
-        let mut sectors: [u8; 8192] = [0; 2 * 4096];
-        fs.read_at(fat_sec_number * bytes_per_sec, &mut sectors[..((bytes_per_sec * 2) as usize)]);
+        //let mut sectors: [u8; 8192] = [0; 2 * 4096];
+        //fs.read_at(fat_sec_number * bytes_per_sec, &mut sectors[..((bytes_per_sec * 2) as usize)]);
+        fs.seek_to(fat_sec_number * bytes_per_sec + fat_ent_offset)?;
 
-        match self.fat_type {
+        let res = match self.fat_type {
             FATType::FAT12(_) => {
-                let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+
+                let mut entry = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
+                //let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
                 entry = if entry & 0x0001 == 1 { entry >> 4 }
                         else { entry & 0x0fff };
                 // 0x0ff7 is the bad cluster mark and any cluster value >= 0x0ff8 means EOF
@@ -44,7 +48,7 @@ impl Fat {
                 else if entry == 0x0ff7 {
                     FatEntry::Bad
                 }
-                else if (entry >= 0xff8) {
+                else if entry >= 0xff8 {
                     FatEntry::EndOfChain
                 }
                 else {
@@ -56,7 +60,8 @@ impl Fat {
             }
 
             FATType::FAT16(_) => {
-                let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+                //let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+                let mut entry = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
                 if entry == 0 {
                     FatEntry::Unused
                 }
@@ -75,7 +80,8 @@ impl Fat {
             }
 
             FATType::FAT32(_) => {
-                let mut entry = LittleEndian::read_u32(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 4) as usize]) & 0x0fffffff;
+                //let mut entry = LittleEndian::read_u32(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 4) as usize]) & 0x0fffffff;
+                let mut entry = fs.disk.borrow_mut().read_u32::<LittleEndian>()?;
                 match entry {
                     n if (cluster.cluster_number >= 0x0ffffff7 && cluster.cluster_number <= 0x0fffffff) => {
                         // Handling the case where the current cluster number is not an allocatable cluster number
@@ -93,6 +99,9 @@ impl Fat {
                     })
                 }
             }
-        }
+        };
+        Ok(res)
     }
+
+
  }

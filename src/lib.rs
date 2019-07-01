@@ -1,10 +1,13 @@
 #![crate_type="lib"]
 
-#[macro_use]
-extern crate log;
+//#[macro_use]
+//extern crate log;
 
 extern crate syscall;
 extern crate byteorder;
+#[macro_use]
+extern crate bitflags;
+
 
 pub type Result<T> = std::io::Result<T>;
 pub const BLOCK_SIZE: u64 = 4096;

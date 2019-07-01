@@ -1,15 +1,16 @@
 use super::Result;
 
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Write, Seek, SeekFrom, Error, ErrorKind};
 use std::path::Path;
 use std::default::Default;
 use std::iter::Iterator;
+use std::cell::{RefCell};
 
 use BiosParameterBlock;
 use disk::Disk;
 use bpb::FATType;
 use table::{Fat, FatEntry};
-use byteorder::{LittleEndian, ByteOrder};
+use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use file::Dir;
 
 #[derive(Copy, Clone, Debug)]
@@ -30,9 +31,9 @@ impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
         let ret = self.current_cluster;
         let new = match self.current_cluster {
             Some(c) => {
-                let entry = self.fat_table.get_entry(self.fs, c);
+                let entry = self.fat_table.get_entry(self.fs, c).ok();
                 match entry {
-                    FatEntry::Next(c) => {
+                    Some(FatEntry::Next(c)) => {
                         Some(c)
                     },
                     _ => None
@@ -49,10 +50,80 @@ struct Sector {
     number: u64
 }
 
+#[derive(Default, Debug, Copy, Clone)]
+pub struct FsInfo {
+    /// Lead Signature - must equal 0x41615252
+    lead_sig: u32,
+    /// Value must equal 0x61417272
+    struc_sig: u32,
+    /// Last known free cluster count
+    free_count: u32,
+    /// Hint for free cluster locations
+    next_free: u32,
+    /// 0xAA550000
+    trail_sig: u32,
+}
+
+impl FsInfo {
+    const LEAD_SIG: u32 = 0x41615252;
+    const STRUC_SIG: u32 = 0x61417272;
+    const TRAIL_SIG: u32 = 0xAA550000;
+
+    fn is_valid(&self) -> bool {
+        self.lead_sig == Self::LEAD_SIG && self.struc_sig == Self::STRUC_SIG &&
+            self.trail_sig == Self::TRAIL_SIG
+    }
+
+    pub fn populate<D: Read + Seek>(disk: &mut D, offset: u64) -> Result<Self> {
+
+        let mut fsinfo = FsInfo::default();
+        fsinfo.lead_sig = disk.read_u32::<LittleEndian>()?;
+        disk.seek(SeekFrom::Current(480))?;
+        fsinfo.struc_sig = disk.read_u32::<LittleEndian>()?;
+        fsinfo.free_count = disk.read_u32::<LittleEndian>()?;
+        fsinfo.next_free = disk.read_u32::<LittleEndian>()?;
+        disk.seek(SeekFrom::Current(12))?;
+        fsinfo.trail_sig = disk.read_u32::<LittleEndian>()?;
+
+        if fsinfo.is_valid() {
+            Ok(fsinfo)
+        }
+        else {
+            Err(Error::new(ErrorKind::InvalidData, "Error Parsing FsInfo"))
+        }
+    }
+
+    pub fn update<D: Read + Seek>(&mut self, disk: &mut D, offset: u64) -> Result<()> {
+        disk.seek(SeekFrom::Start(offset))?;
+        self.lead_sig = disk.read_u32::<LittleEndian>()?;
+        disk.seek(SeekFrom::Current(480))?;
+        self.struc_sig = disk.read_u32::<LittleEndian>()?;
+        self.free_count = disk.read_u32::<LittleEndian>()?;
+        self.next_free = disk.read_u32::<LittleEndian>()?;
+        disk.seek(SeekFrom::Current(12))?;
+        self.trail_sig = disk.read_u32::<LittleEndian>()?;
+        Ok(())
+    }
+
+    pub fn flush<D: Write + Seek>(&self, disk: &mut D, offset: u64) -> Result<()> {
+        disk.seek(SeekFrom::Start(offset))?;
+        disk.write_u32::<LittleEndian>(self.lead_sig)?;
+        disk.seek(SeekFrom::Current(480))?;
+        disk.write_u32::<LittleEndian>(self.struc_sig)?;
+        disk.write_u32::<LittleEndian>(self.free_count)?;
+        disk.write_u32::<LittleEndian>(self.next_free)?;
+        disk.seek(SeekFrom::Current(12))?;
+        disk.write_u32::<LittleEndian>(self.trail_sig)?;
+        Ok(())
+    }
+}
+
 pub struct FileSystem<D: Read + Write + Seek> {
-    pub disk: D,
+    pub disk: RefCell<D>,
     pub bpb: BiosParameterBlock,
     pub partition_offset: u64,
+    pub fat_table: Fat,
+    pub fs_info: RefCell<Option<FsInfo>>
 }
 
 impl<D: Read + Write + Seek> FileSystem<D> {
@@ -61,11 +132,23 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         disk.seek(SeekFrom::Start(partition_offset))?;
         let bpb = BiosParameterBlock::populate(&mut disk)?;
 
+        let fsinfo = match bpb.fat_type {
+            FATType::FAT32(s) => {
+                let offset = partition_offset + s.fs_info as u64 * bpb.bytes_per_sector as u64;
+                FsInfo::populate(&mut disk, offset).ok()
+            },
+            _ => None
+        };
+
 
         Ok(FileSystem {
-            disk: disk,
+            disk: RefCell::new(disk),
             bpb: bpb,
             partition_offset: partition_offset,
+            fat_table: Fat {
+                fat_type: bpb.fat_type
+            },
+            fs_info: RefCell::new(fsinfo)
         })
     }
 
@@ -89,8 +172,19 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        self.disk.seek(SeekFrom::Start(self.partition_offset + offset))?;
-        self.disk.read(buf)?;
+        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
+        self.disk.borrow_mut().read(buf)?;
+        Ok(0)
+    }
+
+    pub fn seek_to(&mut self, offset: u64) -> Result<usize> {
+        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
+        Ok(0)
+    }
+
+    pub fn write_to(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
+        self.disk.borrow_mut().write(buf)?;
         Ok(0)
     }
 
@@ -106,12 +200,11 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     fn cluster_iter(&mut self, start_cluster: Cluster) -> ClusterIter<D> {
         ClusterIter {
             current_cluster: Some(start_cluster),
-            fat_table: Fat {
-                fat_type: self.bpb.fat_type
-            },
+            fat_table: self.fat_table,
             fs: self
         }
     }
+
 
 }
 

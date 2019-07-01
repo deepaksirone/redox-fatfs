@@ -16,5 +16,8 @@ fn print_bpb() {
     let mut buf = [0; 32];
     fs.read_cluster(root_clus, &mut buf);
     println!("Buffer = {:?}", buf);
+    println!("BPB = {:?}", fs.bpb);
+    println!("FsInfo = {:?}", fs.fs_info.borrow());
+
 }
 
