@@ -62,6 +62,8 @@ pub struct FsInfo {
     next_free: u32,
     /// 0xAA550000
     trail_sig: u32,
+    /// Dirty flag to flush to disk
+    dirty: bool
 }
 
 impl FsInfo {
@@ -84,6 +86,7 @@ impl FsInfo {
         fsinfo.next_free = disk.read_u32::<LittleEndian>()?;
         disk.seek(SeekFrom::Current(12))?;
         fsinfo.trail_sig = disk.read_u32::<LittleEndian>()?;
+        fsinfo.dirty = false;
 
         if fsinfo.is_valid() {
             Ok(fsinfo)
@@ -123,6 +126,7 @@ pub struct FileSystem<D: Read + Write + Seek> {
     pub bpb: BiosParameterBlock,
     pub partition_offset: u64,
     pub fat_table: Fat,
+    pub first_data_sec: u64,
     pub fs_info: RefCell<Option<FsInfo>>
 }
 
@@ -141,6 +145,16 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         };
 
 
+        let root_dir_sec = ((bpb.root_entries_cnt as u64 * 32) + (bpb.bytes_per_sector as u64 - 1)) / (bpb.bytes_per_sector as u64);
+        let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u64}
+        else {
+            match bpb.fat_type {
+                FATType::FAT32(x) => x.fat_size as u64,
+                _ => panic!("FAT12 and FAT16 volumes should have non-zero BPB_FATSz16")
+            }
+        };
+        let first_data_sec = bpb.rsvd_sec_cnt as u64 + (bpb.num_fats as u64 * fat_sz) + root_dir_sec;
+
         Ok(FileSystem {
             disk: RefCell::new(disk),
             bpb: bpb,
@@ -148,12 +162,13 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             fat_table: Fat {
                 fat_type: bpb.fat_type
             },
+            first_data_sec: first_data_sec,
             fs_info: RefCell::new(fsinfo)
         })
     }
 
     pub fn read_cluster(&mut self, cluster: Cluster, buf: &mut [u8]) -> Result<usize> {
-        let root_dir_sec = ((self.bpb.root_entries_cnt as u64 * 32) + (self.bpb.bytes_per_sector as u64 - 1)) / (self.bpb.bytes_per_sector as u64);
+        /*let root_dir_sec = ((self.bpb.root_entries_cnt as u64 * 32) + (self.bpb.bytes_per_sector as u64 - 1)) / (self.bpb.bytes_per_sector as u64);
         let fat_sz = if self.bpb.fat_size_16 != 0 { self.bpb.fat_size_16 as u64}
                          else {
                             match self.bpb.fat_type {
@@ -161,10 +176,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
                                 _ => panic!("FAT12 and FAT16 volumes should have non-zero BPB_FATSz16")
                             }
                          };
-        let first_data_sec = self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * fat_sz) + root_dir_sec;
-        let first_sec_cluster = (cluster.cluster_number - 2) * (self.bpb.sectors_per_cluster as u64) + first_data_sec;
-        println!("Read Cluster Offset = {:x}", first_sec_cluster * (self.bpb.bytes_per_sector as u64));
-        self.read_at(first_sec_cluster * (self.bpb.bytes_per_sector as u64), buf)
+        let first_data_sec = self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * fat_sz) + root_dir_sec;*/
+        let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
+        println!("Read Cluster Offset = {:x}", first_sec_cluster * self.bytes_per_sec());
+        self.read_at(first_sec_cluster * self.bytes_per_sec(), buf)
     }
 
     pub fn clusters(&mut self, start_cluster: Cluster) -> Vec<Cluster> {
@@ -196,6 +211,9 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.bpb.bytes_per_sector as u64
     }
 
+    pub fn sectors_per_cluster(&self) -> u64 {
+        self.bpb.sectors_per_cluster as u64
+    }
 
     fn cluster_iter(&mut self, start_cluster: Cluster) -> ClusterIter<D> {
         ClusterIter {

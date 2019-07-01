@@ -17,7 +17,7 @@ pub enum FatEntry {
 }
 
 impl Fat {
-    pub fn get_entry<D: Read + Seek + Write>(&mut self, fs: &mut FileSystem<D>, cluster: Cluster) -> Result<FatEntry> {
+    pub fn get_entry<D: Read + Seek + Write>(&self, fs: &mut FileSystem<D>, cluster: Cluster) -> Result<FatEntry> {
         let current_cluster = cluster.cluster_number;
         let fat_offset = match self.fat_type {
             FATType::FAT12(_) => current_cluster + (current_cluster / 2),
@@ -103,5 +103,14 @@ impl Fat {
         Ok(res)
     }
 
+    pub fn get_free_cluster<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>,
+                                                    fs_info: Option<FsInfo>) -> Result<Cluster> {
+        unimplemented!()
+    }
+
+    pub fn set_entry<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>, cluster: Cluster,
+                                             next_cluster: Cluster) -> Result<()> {
+        unimplemented!()
+    }
 
  }
