@@ -116,11 +116,11 @@ pub fn get_entry<D: Read + Seek + Write>(fat_type: FATType, fs: &mut FileSystem<
 
 pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cluster: Cluster,
                                                 end_cluster: Cluster) -> Result<Cluster> {
-    let fat_start_sector = fs.fat_start_sector();
-    let bytes_per_sec = fs.bytes_per_sec();
+
     let max_cluster = fs.max_cluster_number();
 
     let mut cluster = start_cluster.cluster_number;
+    /*
     let fat_offset = match fs.bpb.fat_type {
         FATType::FAT12(_) => cluster + (cluster / 2),
         FATType::FAT16(_) => cluster * 2,
@@ -128,9 +128,9 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
     };
 
     let fat_sec_number = fat_start_sector + (fat_offset / bytes_per_sec);
-    let fat_ent_offset = fat_offset % bytes_per_sec;
+    let fat_ent_offset = fat_offset % bytes_per_sec;*/
 
-    fs.seek_to(fat_sec_number * bytes_per_sec + fat_ent_offset)?;
+    fs.seek_to(get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
 
     match fs.bpb.fat_type {
         FATType::FAT12(_) => {
