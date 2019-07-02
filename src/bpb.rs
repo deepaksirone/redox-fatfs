@@ -67,6 +67,7 @@ pub enum FATType {
     FAT16(BiosParameterBlockLegacy)
 }
 
+
 /// Bios Parameter Block for FAT12 and FAT16 volumes
 #[derive(Copy, Clone, Default)]
 pub struct BiosParameterBlockLegacy {

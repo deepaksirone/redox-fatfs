@@ -5,11 +5,12 @@ use std::path::Path;
 use std::default::Default;
 use std::iter::Iterator;
 use std::cell::{RefCell};
+use std::cmp::{Eq, PartialEq, Ord, PartialOrd, Ordering};
 
 use BiosParameterBlock;
 use disk::Disk;
 use bpb::FATType;
-use table::{Fat, FatEntry};
+use table::{FatEntry, get_entry};
 use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use file::Dir;
 
@@ -19,9 +20,22 @@ pub struct Cluster {
     pub parent_cluster: u64,
 }
 
+impl PartialOrd for Cluster {
+    fn partial_cmp(&self, other: &Cluster) -> Option<Ordering> {
+        self.cluster_number.partial_cmp(&other.cluster_number)
+    }
+}
+
+impl PartialEq for Cluster {
+    fn eq(&self, other: &Self) -> bool {
+        self.cluster_number == other.cluster_number
+    }
+}
+
+impl Eq for Cluster {}
+
 struct ClusterIter<'a, D: Read + Write + Seek> {
     current_cluster: Option<Cluster>,
-    fat_table: Fat,
     fs: &'a mut FileSystem<D>
 }
 
@@ -31,7 +45,7 @@ impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
         let ret = self.current_cluster;
         let new = match self.current_cluster {
             Some(c) => {
-                let entry = self.fat_table.get_entry(self.fs, c).ok();
+                let entry = get_entry(self.fs.bpb.fat_type, self.fs, c).ok();
                 match entry {
                     Some(FatEntry::Next(c)) => {
                         Some(c)
@@ -119,15 +133,18 @@ impl FsInfo {
         disk.write_u32::<LittleEndian>(self.trail_sig)?;
         Ok(())
     }
+
+    pub fn get_next_free(&self) -> u64 {
+        self.next_free as u64
+    }
 }
 
 pub struct FileSystem<D: Read + Write + Seek> {
     pub disk: RefCell<D>,
     pub bpb: BiosParameterBlock,
     pub partition_offset: u64,
-    pub fat_table: Fat,
     pub first_data_sec: u64,
-    pub fs_info: RefCell<Option<FsInfo>>
+    pub fs_info: RefCell<FsInfo>
 }
 
 impl<D: Read + Write + Seek> FileSystem<D> {
@@ -139,9 +156,9 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         let fsinfo = match bpb.fat_type {
             FATType::FAT32(s) => {
                 let offset = partition_offset + s.fs_info as u64 * bpb.bytes_per_sector as u64;
-                FsInfo::populate(&mut disk, offset).ok()
+                FsInfo::populate(&mut disk, offset).expect("Error Parsing FsInfo")
             },
-            _ => None
+            _ => FsInfo::default()
         };
 
 
@@ -159,9 +176,6 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             disk: RefCell::new(disk),
             bpb: bpb,
             partition_offset: partition_offset,
-            fat_table: Fat {
-                fat_type: bpb.fat_type
-            },
             first_data_sec: first_data_sec,
             fs_info: RefCell::new(fsinfo)
         })
@@ -215,10 +229,29 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.bpb.sectors_per_cluster as u64
     }
 
+    pub fn mirroring_enabled(&self) -> bool {
+        match self.bpb.fat_type {
+            FATType::FAT32(s) => s.ext_flags & 0x80 == 0,
+            _ => false
+        }
+    }
+
+    pub fn max_cluster_number(&self) -> Cluster {
+        match self.bpb.fat_type {
+            FATType::FAT32(_) => {
+                let tot_clusters = (self.bpb.total_sectors_32 as u64 + self.bpb.sectors_per_cluster as u64 - 1) / self.bpb.sectors_per_cluster as u64;
+                Cluster::new(tot_clusters)
+            },
+            _ => {
+                let tot_clusters = (self.bpb.total_sectors_16 as u64 + self.bpb.sectors_per_cluster as u64 - 1) / self.bpb.sectors_per_cluster as u64;
+                Cluster::new(tot_clusters as u64)
+            }
+        }
+    }
+
     fn cluster_iter(&mut self, start_cluster: Cluster) -> ClusterIter<D> {
         ClusterIter {
             current_cluster: Some(start_cluster),
-            fat_table: self.fat_table,
             fs: self
         }
     }
