@@ -196,6 +196,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.read_at(first_sec_cluster * self.bytes_per_sec(), buf)
     }
 
+    pub fn read_sector(&mut self, sector: u64, buf: &mut [u8]) -> Result<usize> {
+        self.read_at(sector * self.bytes_per_sec(), buf)
+    }
+
     pub fn clusters(&mut self, start_cluster: Cluster) -> Vec<Cluster> {
         self.cluster_iter(start_cluster).collect()
     }
@@ -217,8 +221,20 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         Ok(0)
     }
 
+    pub fn fat_size(&self) -> u64 {
+        if self.bpb.fat_size_16 != 0 { self.bpb.fat_size_16 as u64 }
+        else {
+            match self.bpb.fat_type {
+                FATType::FAT32(x) => x.fat_size as u64,
+                _ => panic!("FAT12 and FAT16 volumes should have non-zero BPB_FATSz16")
+            }
+        }
+    }
+
     pub fn fat_start_sector(&self) -> u64 {
-        self.bpb.rsvd_sec_cnt as u64
+        let active_fat = self.active_fat();
+        let fat_sz = self.fat_size();
+        self.bpb.rsvd_sec_cnt as u64 + (active_fat * fat_sz)
     }
 
     pub fn bytes_per_sec(&self) -> u64 {
@@ -233,6 +249,18 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         match self.bpb.fat_type {
             FATType::FAT32(s) => s.ext_flags & 0x80 == 0,
             _ => false
+        }
+    }
+
+    pub fn active_fat(&self) -> u64 {
+        if self.mirroring_enabled() {
+            0
+        }
+        else {
+            match self.bpb.fat_type {
+                FATType::FAT32(s) => (s.ext_flags & 0x0F) as u64,
+                _ => 0
+            }
         }
     }
 
