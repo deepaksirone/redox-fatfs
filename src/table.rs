@@ -149,7 +149,7 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
                 }
 
                 cluster += 1;
-                if cluster == end_cluster.cluster_number {
+                if cluster == end_cluster.cluster_number || cluster == max_cluster.cluster_number {
                     return Err(Error::new(ErrorKind::Other, "Space Exhausted on Disk"))
                 }
 
@@ -166,7 +166,7 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
 
         FATType::FAT16(_) => {
             fs.seek_to(get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
-            while cluster < end_cluster.cluster_number {
+            while cluster < end_cluster.cluster_number && cluster < max_cluster.cluster_number {
                 let mut packed_val = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
                 if packed_val == 0 {
                     return Ok(Cluster::new(cluster as u64));
