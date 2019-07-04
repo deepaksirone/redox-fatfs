@@ -45,7 +45,7 @@ impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
         let ret = self.current_cluster;
         let new = match self.current_cluster {
             Some(c) => {
-                let entry = get_entry(self.fs.bpb.fat_type, self.fs, c).ok();
+                let entry = get_entry(self.fs, c).ok();
                 match entry {
                     Some(FatEntry::Next(c)) => {
                         Some(c)

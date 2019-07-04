@@ -1,7 +1,7 @@
 #![crate_type="lib"]
 
-//#[macro_use]
-//extern crate log;
+#[macro_use]
+extern crate log;
 
 extern crate syscall;
 extern crate byteorder;
