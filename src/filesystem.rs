@@ -266,13 +266,16 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
     pub fn max_cluster_number(&self) -> Cluster {
         match self.bpb.fat_type {
-            FATType::FAT32(_) => {
-                let tot_clusters = (self.bpb.total_sectors_32 as u64 + self.bpb.sectors_per_cluster as u64 - 1) / self.bpb.sectors_per_cluster as u64;
-                Cluster::new(tot_clusters)
+            FATType::FAT32(s) => {
+                let data_sec = self.bpb.total_sectors_32 as u64 - (self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * s.fat_size as u64));
+                let tot_clusters = data_sec / self.bpb.sectors_per_cluster as u64;
+                Cluster::new(tot_clusters + 1)
             },
             _ => {
-                let tot_clusters = (self.bpb.total_sectors_16 as u64 + self.bpb.sectors_per_cluster as u64 - 1) / self.bpb.sectors_per_cluster as u64;
-                Cluster::new(tot_clusters as u64)
+                let root_dir_sectors = ((self.bpb.root_entries_cnt as u64 * 32) + self.bytes_per_sec() - 1) / self.bytes_per_sec();
+                let data_sec = self.bpb.total_sectors_16 as u64 - (self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * self.bpb.fat_size_16 as u64) + root_dir_sectors);
+                let tot_clusters = data_sec / self.bpb.sectors_per_cluster as u64;
+                Cluster::new(tot_clusters + 1)
             }
         }
     }

@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-
+#[test]
 fn print_fat32() {
     let mut f = fs::File::open("images/fat32.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -22,10 +22,12 @@ fn print_fat32() {
 
     let free = get_free_cluster(&mut fs, Cluster::new(15), Cluster::new(100));
     println!("Free Cluster = {:?}", free);
+    let max_cluster = fs.max_cluster_number();
+    println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
 
 }
 
-
+#[test]
 fn print_fat12() {
     let mut f = fs::File::open("images/fat12.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -47,6 +49,8 @@ fn print_fat12() {
 
     let free = get_free_cluster(&mut fs, Cluster::new(7), Cluster::new(100));
     println!("Free Cluster = {:?}", free);
+    let max_cluster = fs.max_cluster_number();
+    println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
 
 }
 
@@ -54,6 +58,7 @@ fn print_fat12() {
 fn print_fat16() {
     let mut f = fs::File::open("images/fat16.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
+    let max_cluster = fs.max_cluster_number();
     let root_sec = fs.bpb.rsvd_sec_cnt as u64 + (fs.bpb.num_fats as u64 * fs.bpb.fat_size_16 as u64);
     let root_clus = Cluster::new(root_sec / fs.bpb.sectors_per_cluster as u64);
     println!("Root Cluster = {:?}", fs.clusters(root_clus));
@@ -72,6 +77,6 @@ fn print_fat16() {
 
     let free = get_free_cluster(&mut fs, Cluster::new(5), Cluster::new(100));
     println!("Free Cluster = {:?}", free);
-
+    println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
 }
 
