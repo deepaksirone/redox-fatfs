@@ -134,8 +134,12 @@ impl FsInfo {
         Ok(())
     }
 
-    pub fn get_next_free(&self) -> u64 {
-        self.next_free as u64
+    pub fn get_next_free(&self) -> Option<u64> {
+        match self.next_free {
+            0xFFFFFFFF => None,
+            0 | 1 => None,
+            n => Some(n as u64)
+        }
     }
 }
 
@@ -191,13 +195,15 @@ impl<D: Read + Write + Seek> FileSystem<D> {
                             }
                          };
         let first_data_sec = self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * fat_sz) + root_dir_sec;*/
+        let bytes_per_sec = self.bytes_per_sec();
         let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
         println!("Read Cluster Offset = {:x}", first_sec_cluster * self.bytes_per_sec());
-        self.read_at(first_sec_cluster * self.bytes_per_sec(), buf)
+        self.read_at(first_sec_cluster * bytes_per_sec, buf)
     }
 
     pub fn read_sector(&mut self, sector: u64, buf: &mut [u8]) -> Result<usize> {
-        self.read_at(sector * self.bytes_per_sec(), buf)
+        let bytes_per_sec = self.bytes_per_sec();
+        self.read_at(sector * bytes_per_sec, buf)
     }
 
     pub fn clusters(&mut self, start_cluster: Cluster) -> Vec<Cluster> {
@@ -205,7 +211,8 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
+        let partition_offset = self.partition_offset;
+        self.disk.borrow_mut().seek(SeekFrom::Start(partition_offset + offset))?;
         self.disk.borrow_mut().read(buf)?;
         Ok(0)
     }
@@ -237,6 +244,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.bpb.rsvd_sec_cnt as u64 + (active_fat * fat_sz)
     }
 
+    #[inline]
     pub fn bytes_per_sec(&self) -> u64 {
         self.bpb.bytes_per_sector as u64
     }

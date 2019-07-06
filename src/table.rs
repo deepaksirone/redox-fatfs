@@ -49,8 +49,11 @@ pub fn get_entry<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cluste
     //let mut sectors: [u8; 8192] = [0; 2 * 4096];
     //fs.read_at(fat_sec_number * bytes_per_sec, &mut sectors[..((bytes_per_sec * 2) as usize)]);*/
     //println!("[get_entry] FAT Offset: {:x} for cluster {:?}", get_fat_offset(fs.bpb.fat_type, cluster, fs.fat_start_sector(), fs.bytes_per_sec()), cluster);
+    let fat_type = fs.bpb.fat_type;
+    let fat_start_sector = fs.fat_start_sector();
+    let bytes_per_sec = fs.bytes_per_sec();
 
-    fs.seek_to(get_fat_offset(fs.bpb.fat_type, cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
+    fs.seek_to(get_fat_offset(fat_type, cluster, fat_start_sector, bytes_per_sec))?;
 
     let res = match fs.bpb.fat_type {
         FATType::FAT12(_) => {
@@ -137,10 +140,13 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
     let fat_ent_offset = fat_offset % bytes_per_sec;*/
     //println!("[get_free] Fat Offset = {:X} for cluster = {:?}", get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()), start_cluster.cluster_number);
     //fs.seek_to(get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
+    let fat_type = fs.bpb.fat_type;
+    let fat_start_sector = fs.fat_start_sector();
+    let bytes_per_sec = fs.bytes_per_sec();
 
-    match fs.bpb.fat_type {
+    match fat_type {
         FATType::FAT12(_) => {
-            fs.seek_to(get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
+            fs.seek_to(get_fat_offset(fat_type, start_cluster, fat_start_sector, bytes_per_sec))?;
             let mut packed_val = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
 
 
@@ -169,7 +175,8 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
         },
 
         FATType::FAT16(_) => {
-            fs.seek_to(get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec()))?;
+            let fat_offset = get_fat_offset(fs.bpb.fat_type, start_cluster, fs.fat_start_sector(), fs.bytes_per_sec());
+            fs.seek_to(fat_offset)?;
             while cluster < end_cluster.cluster_number && cluster < max_cluster.cluster_number {
                 let mut packed_val = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
                 if packed_val == 0 {
@@ -181,9 +188,16 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
         },
 
         FATType::FAT32(_) => {
-            cluster = min(fs.fs_info.borrow().get_next_free(), cluster);
+            let next_free = match fs.fs_info.borrow().get_next_free() {
+                Some(x) => x,
+                None => 0xFFFFFFFF
+            };
+            cluster = min(next_free, cluster);
+            let fat_type = fs.bpb.fat_type;
+            let fat_start_sector = fs.fat_start_sector();
+            let bytes_per_sec = fs.bytes_per_sec();
             //println!("[get_free] Fat Offset = {:X} for cluster = {:?}", get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec()), cluster);
-            fs.seek_to(get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec()))?;
+            fs.seek_to(get_fat_offset(fat_type, Cluster::new(cluster), fat_start_sector, bytes_per_sec))?;
             while cluster < end_cluster.cluster_number && cluster < max_cluster.cluster_number {
                 //let entry = get_entry(fs.bpb.fat_type, fs, Cluster::new(cluster)).ok();
                 let val = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0x0FFFFFFF;
@@ -304,4 +318,11 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
             Ok(count)
         }
     }
+}
+
+
+pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_cluster: Cluster) -> Result<Cluster> {
+    let end_cluster = fs.max_cluster_number();
+    unimplemented!()
+
 }
