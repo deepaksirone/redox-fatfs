@@ -323,6 +323,31 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
 
 pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_cluster: Cluster) -> Result<Cluster> {
     let end_cluster = fs.max_cluster_number();
-    unimplemented!()
+    let start_cluster = match fs.bpb.fat_type {
+        FATType::FAT32(_) => {
+            let next_free = match fs.fs_info.borrow().get_next_free() {
+                Some(x) => x,
+                None => 0xFFFFFFFF
+            };
+            Cluster::new(min(next_free, RESERVED_CLUSTERS))
+        },
+        _ => Cluster::new(RESERVED_CLUSTERS),
+
+    };
+    let free_cluster = get_free_cluster(fs, start_cluster, end_cluster)?;
+    set_entry(fs, free_cluster, FatEntry::EndOfChain)?;
+    set_entry(fs, prev_cluster, FatEntry::Next(free_cluster))?;
+    Ok(free_cluster)
+}
+
+pub fn deallocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluster) -> Result<()> {
+    let entry = get_entry(fs, cluster)?;
+    if entry != FatEntry::Bad {
+        set_entry(fs, cluster, FatEntry::Unused)?;
+        Ok(())
+    }
+    else {
+        Err(Error::new(ErrorKind::Other, "Bad clusters cannot be freed"))
+    }
 
 }
