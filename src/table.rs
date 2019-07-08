@@ -246,21 +246,26 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
             Ok(())
         },
         FATType::FAT32(_) => {
-            fs.seek_to(fat_offset);
-            let old_bits = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0xF0000000;
-            if fat_entry == FatEntry::Unused && cluster.cluster_number >= 0x0FFFFFF7 && cluster.cluster_number <= 0x0FFFFFFF {
-                warn!("Reserved Cluster {:?} cannot be marked as free", cluster);
-            }
+            //fs.seek_to(fat_offset);
+            let fat_size = fs.fat_size();
+            let bound = if fs.mirroring_enabled() { 1 } else { fs.bpb.num_fats as u64 };
+            for i in 0..bound {
+                fs.seek_to(fat_offset + i as u64 * fat_size);
+                let old_bits = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0xF0000000;
+                if fat_entry == FatEntry::Unused && cluster.cluster_number >= 0x0FFFFFF7 && cluster.cluster_number <= 0x0FFFFFFF {
+                    warn!("Reserved Cluster {:?} cannot be marked as free", cluster);
+                }
 
-            let mut raw_val = match fat_entry {
-                FatEntry::Unused => 0,
-                FatEntry::Bad => 0x0FFFFFF7,
-                FatEntry::EndOfChain => 0x0FFFFFFF,
-                FatEntry::Next(c) => c.cluster_number as u32
-            };
-            raw_val = raw_val | old_bits;
-            fs.seek_to(fat_offset);
-            fs.disk.borrow_mut().write_u32::<LittleEndian>(raw_val)?;
+                let mut raw_val = match fat_entry {
+                    FatEntry::Unused => 0,
+                    FatEntry::Bad => 0x0FFFFFF7,
+                    FatEntry::EndOfChain => 0x0FFFFFFF,
+                    FatEntry::Next(c) => c.cluster_number as u32
+                };
+                raw_val = raw_val | old_bits;
+                fs.seek_to(fat_offset + i as u64 * fat_size);
+                fs.disk.borrow_mut().write_u32::<LittleEndian>(raw_val)?;
+            }
             Ok(())
         }
 
@@ -350,4 +355,12 @@ pub fn deallocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluste
         Err(Error::new(ErrorKind::Other, "Bad clusters cannot be freed"))
     }
 
+}
+
+pub fn deallocate_cluster_chain<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluster) -> Result<()> {
+    let clusters = fs.clusters(cluster);
+    for c in clusters {
+        deallocate_cluster(fs, c)?;
+    }
+    Ok(())
 }

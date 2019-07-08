@@ -14,7 +14,7 @@ fn print_fat32() {
     let root_clus = Cluster::new(2);
     println!("Root Cluster = {:?}", fs.clusters(root_clus));
     let mut buf = [0; 32];
-    fs.read_cluster(root_clus, &mut buf);
+    fs.read_cluster(Cluster::new(14), &mut buf);
     println!("Buffer = {:?}", buf);
     println!("BPB = {:?}", fs.bpb);
     println!("FsInfo = {:?}", fs.fs_info.borrow());
@@ -24,10 +24,11 @@ fn print_fat32() {
     println!("Free Cluster = {:?}", free);
     let max_cluster = fs.max_cluster_number();
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
+    println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(14)));
 
 }
 
-#[test]
+
 fn print_fat12() {
     let mut f = fs::File::open("images/fat12.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -51,10 +52,11 @@ fn print_fat12() {
     println!("Free Cluster = {:?}", free);
     let max_cluster = fs.max_cluster_number();
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
+    println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(3)));
 
 }
 
-#[test]
+
 fn print_fat16() {
     let mut f = fs::File::open("images/fat16.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -78,5 +80,6 @@ fn print_fat16() {
     let free = get_free_cluster(&mut fs, Cluster::new(5), Cluster::new(100));
     println!("Free Cluster = {:?}", free);
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
+    println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(3)));
 }
 

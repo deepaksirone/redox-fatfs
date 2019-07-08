@@ -57,3 +57,6 @@ pub struct ShortDirEntry {
     file_size: u32
 }
 
+pub struct LongDirEntry {
+
+}
