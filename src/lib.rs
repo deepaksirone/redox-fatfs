@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate log;
 
-extern crate syscall;
+//extern crate syscall;
 extern crate byteorder;
 #[macro_use]
 extern crate bitflags;
@@ -15,14 +15,13 @@ pub const BLOCK_SIZE: u64 = 4096;
 
 
 
-mod disk;
 mod bpb;
 mod filesystem;
-mod file;
+mod dir_entry;
 mod table;
 
-pub use disk::*;
+//pub use disk::*;
 pub use bpb::*;
 pub use filesystem::*;
-pub use file::*;
+pub use dir_entry::*;
 pub use table::*;

@@ -58,5 +58,27 @@ pub struct ShortDirEntry {
 }
 
 pub struct LongDirEntry {
+    /// Ordinal of the entry
+    ord: u8,
+    /// Characters 1-5 of name
+    name1: [u8; 10],
+    /// File Attributes
+    file_attrs: FileAttributes,
+    /// Entry Type: If zero indicates that the entry
+    /// is a subcomponent of a long name
+    /// Non-zero values are reserved
+    dirent_type: u8,
+    /// Checksum computed from short name
+    chksum: u8,
+    /// Characters 6-11 of name
+    name2: [u8; 10],
+    /// FirstCluster Low Word
+    /// Should be zero in a long file entry
+    first_clus_low: u16,
+    /// Characters 12-13 of name
+    name3: [u8; 4]
+}
+
+pub enum DirEntry {
 
 }

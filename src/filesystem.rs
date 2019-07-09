@@ -8,11 +8,11 @@ use std::cell::{RefCell};
 use std::cmp::{Eq, PartialEq, Ord, PartialOrd, Ordering};
 
 use BiosParameterBlock;
-use disk::Disk;
+//use disk::Disk;
 use bpb::FATType;
-use table::{FatEntry, get_entry};
+use table::{FatEntry, get_entry, get_entry_raw};
 use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
-use file::Dir;
+use dir_entry::Dir;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Cluster {
@@ -77,7 +77,9 @@ pub struct FsInfo {
     /// 0xAA550000
     trail_sig: u32,
     /// Dirty flag to flush to disk
-    dirty: bool
+    dirty: bool,
+    /// Relative Offset of FsInfo Structure
+    offset: u64
 }
 
 impl FsInfo {
@@ -101,6 +103,7 @@ impl FsInfo {
         disk.seek(SeekFrom::Current(12))?;
         fsinfo.trail_sig = disk.read_u32::<LittleEndian>()?;
         fsinfo.dirty = false;
+        fsinfo.offset = offset;
 
         if fsinfo.is_valid() {
             Ok(fsinfo)
@@ -110,8 +113,8 @@ impl FsInfo {
         }
     }
 
-    pub fn update<D: Read + Seek>(&mut self, disk: &mut D, offset: u64) -> Result<()> {
-        disk.seek(SeekFrom::Start(offset))?;
+    pub fn update<D: Read + Seek>(&mut self, disk: &mut D) -> Result<()> {
+        disk.seek(SeekFrom::Start(self.offset))?;
         self.lead_sig = disk.read_u32::<LittleEndian>()?;
         disk.seek(SeekFrom::Current(480))?;
         self.struc_sig = disk.read_u32::<LittleEndian>()?;
@@ -122,8 +125,8 @@ impl FsInfo {
         Ok(())
     }
 
-    pub fn flush<D: Write + Seek>(&self, disk: &mut D, offset: u64) -> Result<()> {
-        disk.seek(SeekFrom::Start(offset))?;
+    pub fn flush<D: Write + Seek>(&self, disk: &mut D) -> Result<()> {
+        disk.seek(SeekFrom::Start(self.offset))?;
         disk.write_u32::<LittleEndian>(self.lead_sig)?;
         disk.seek(SeekFrom::Current(480))?;
         disk.write_u32::<LittleEndian>(self.struc_sig)?;
@@ -295,6 +298,33 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         }
     }
 
+    pub fn clean_shut_bit(&mut self) -> Result<bool> {
+        match self.bpb.fat_type {
+            FATType::FAT32(_) => {
+                let bit = get_entry_raw(self, Cluster::new(1))? & 0x08000000;
+                Ok(bit == 1)
+            },
+            FATType::FAT16(_) => {
+                let bit = get_entry_raw(self, Cluster::new(1))? & 0x8000;
+                Ok(bit == 1)
+            },
+            _ => Ok(true)
+        }
+    }
+
+    pub fn hard_error_bit(&mut self) -> Result<bool> {
+        match self.bpb.fat_type {
+            FATType::FAT32(_) => {
+                let bit = get_entry_raw(self, Cluster::new(1))? & 0x04000000;
+                Ok(bit == 1)
+            },
+            FATType::FAT16(_) => {
+                let bit = get_entry_raw(self, Cluster::new(1))? & 0x4000;
+                Ok(bit == 1)
+            },
+            _ => Ok(true)
+        }
+    }
 
 }
 

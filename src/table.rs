@@ -123,6 +123,51 @@ pub fn get_entry<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cluste
         Ok(res)
 }
 
+pub fn get_entry_raw<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cluster) -> Result<u64> {
+    let current_cluster = cluster.cluster_number;
+    /*
+    let fat_offset = match fat_type {
+            FATType::FAT12(_) => current_cluster + (current_cluster / 2),
+            FATType::FAT16(_) => current_cluster * 2,
+            FATType::FAT32(_) => current_cluster * 4,
+    };
+
+    let fat_start_sector = fs.fat_start_sector();
+    let bytes_per_sec = fs.bytes_per_sec();
+
+    let fat_sec_number = fat_start_sector + (fat_offset / bytes_per_sec);
+    let fat_ent_offset = fat_offset % bytes_per_sec;
+    //let mut sectors: [u8; 8192] = [0; 2 * 4096];
+    //fs.read_at(fat_sec_number * bytes_per_sec, &mut sectors[..((bytes_per_sec * 2) as usize)]);*/
+    //println!("[get_entry] FAT Offset: {:x} for cluster {:?}", get_fat_offset(fs.bpb.fat_type, cluster, fs.fat_start_sector(), fs.bytes_per_sec()), cluster);
+    let fat_type = fs.bpb.fat_type;
+    let fat_start_sector = fs.fat_start_sector();
+    let bytes_per_sec = fs.bytes_per_sec();
+
+    fs.seek_to(get_fat_offset(fat_type, cluster, fat_start_sector, bytes_per_sec))?;
+
+    let res = match fs.bpb.fat_type {
+        FATType::FAT12(_) => {
+            let mut entry = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
+            //let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+            entry = if current_cluster & 0x0001 > 0 { entry >> 4 }
+                    else { entry & 0x0fff };
+            entry as u64
+        }
+        FATType::FAT16(_) => {
+            //let mut entry = LittleEndian::read_u16(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 2) as usize]);
+            let mut entry = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
+            entry as u64
+        }
+        FATType::FAT32(_) => {
+            //let mut entry = LittleEndian::read_u32(&sectors[fat_ent_offset as usize ..(fat_ent_offset + 4) as usize]) & 0x0fffffff;
+            let mut entry = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0x0FFFFFFF;
+            //println!("FAT32 entry for cluster {:?} = {:x}", cluster, entry);
+            entry as u64
+        }
+    };
+    Ok(res)
+}
 pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cluster: Cluster,
                                                 end_cluster: Cluster) -> Result<Cluster> {
 
@@ -326,22 +371,33 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
 }
 
 
-pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_cluster: Cluster) -> Result<Cluster> {
+pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_cluster: Option<Cluster>) -> Result<Cluster> {
     let end_cluster = fs.max_cluster_number();
-    let start_cluster = match fs.bpb.fat_type {
+    let mut start_cluster = match fs.bpb.fat_type {
         FATType::FAT32(_) => {
             let next_free = match fs.fs_info.borrow().get_next_free() {
                 Some(x) => x,
                 None => 0xFFFFFFFF
             };
-            Cluster::new(min(next_free, RESERVED_CLUSTERS))
+            if next_free < end_cluster.cluster_number {
+                Cluster::new(next_free)
+            } else {
+                Cluster::new(RESERVED_CLUSTERS)
+            }
         },
         _ => Cluster::new(RESERVED_CLUSTERS),
 
     };
-    let free_cluster = get_free_cluster(fs, start_cluster, end_cluster)?;
+    let free_cluster = match get_free_cluster(fs, start_cluster, end_cluster) {
+        Ok(c) => c,
+        Err(_) if start_cluster.cluster_number > RESERVED_CLUSTERS => get_free_cluster(fs, Cluster::new(RESERVED_CLUSTERS), end_cluster)?,
+        Err(e) => return Err(e)
+    };
+
     set_entry(fs, free_cluster, FatEntry::EndOfChain)?;
-    set_entry(fs, prev_cluster, FatEntry::Next(free_cluster))?;
+    if let Some(prev_clus) = prev_cluster {
+        set_entry(fs, prev_clus, FatEntry::Next(free_cluster))?;
+    }
     Ok(free_cluster)
 }
 
