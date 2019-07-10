@@ -349,7 +349,7 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
         FATType::FAT16(_) => {
             let fat_offset = get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec());
             fs.seek_to(fat_offset)?;
-            while cluster < end_cluster.cluster_number {
+            while cluster <= end_cluster.cluster_number {
                 let mut val = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
                 if val == 0 {
                     count += 1;
@@ -362,7 +362,7 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
         FATType::FAT32(_) => {
             let fat_offset = get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec());
             fs.seek_to(fat_offset)?;
-            while cluster < end_cluster.cluster_number {
+            while cluster <= end_cluster.cluster_number {
                 let mut val = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0x0FFFFFFF;
                 if val == 0 {
                     count += 1;
@@ -380,7 +380,7 @@ pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_clu
     let end_cluster = fs.max_cluster_number();
     let mut start_cluster = match fs.bpb.fat_type {
         FATType::FAT32(_) => {
-            let next_free = match fs.fs_info.borrow().get_next_free(end_cluster) {
+            let next_free = match fs.fs_info.borrow().get_next_free() {
                 Some(x) => x,
                 None => 0xFFFFFFFF
             };

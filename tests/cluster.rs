@@ -12,6 +12,7 @@ fn print_fat32() {
     let mut f = fs::File::open("images/fat32.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let root_clus = Cluster::new(2);
+    let max_cluster = fs.max_cluster_number();
     println!("Root Cluster = {:?}", fs.clusters(root_clus));
     let mut buf = [0; 32];
     fs.read_cluster(Cluster::new(14), &mut buf);
@@ -20,9 +21,10 @@ fn print_fat32() {
     println!("FsInfo = {:?}", fs.fs_info.borrow());
     println!("Mirroring Enabled = {:?}", fs.mirroring_enabled());
 
-    let free = get_free_cluster(&mut fs, Cluster::new(15), Cluster::new(100));
-    println!("Free Cluster = {:?}", free);
+    //let free = get_free_cluster(&mut fs, Cluster::new(15), Cluster::new(100));
+    //println!("Free Cluster = {:?}", free);
     let max_cluster = fs.max_cluster_number();
+    println!("Free clusters from FsInfo = {:?}", fs.fs_info.borrow().get_free_count(max_cluster));
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
     println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(14)));
     println!("Clean shut bit = {:?}", fs.clean_shut_bit());

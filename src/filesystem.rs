@@ -10,7 +10,7 @@ use std::cmp::{Eq, PartialEq, Ord, PartialOrd, Ordering};
 use BiosParameterBlock;
 //use disk::Disk;
 use bpb::FATType;
-use table::{FatEntry, get_entry, get_entry_raw, set_entry};
+use table::{FatEntry, get_entry, get_entry_raw, set_entry, RESERVED_CLUSTERS};
 use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use dir_entry::Dir;
 
@@ -144,11 +144,24 @@ impl FsInfo {
         Ok(())
     }
 
-    pub fn get_next_free(&self, max_cluster: Cluster) -> Option<u64> {
+    pub fn get_next_free(&self) -> Option<u64> {
         match self.next_free {
             0xFFFFFFFF => None,
             0 | 1 => None,
             n => Some(n as u64)
+        }
+    }
+
+    pub fn get_free_count(&self, max_cluster: Cluster) -> Option<u64> {
+        let count_clusters = max_cluster.cluster_number - 1;
+        if self.free_count as u64 > count_clusters {
+            None
+        }
+        else {
+            match self.free_count {
+                0xFFFFFFFF => None,
+                n => Some(n as u64)
+            }
         }
     }
 
@@ -313,13 +326,13 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             FATType::FAT32(s) => {
                 let data_sec = self.bpb.total_sectors_32 as u64 - (self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * s.fat_size as u64));
                 let tot_clusters = data_sec / self.bpb.sectors_per_cluster as u64;
-                Cluster::new(tot_clusters + 1)
+                Cluster::new(tot_clusters + RESERVED_CLUSTERS - 1)
             },
             _ => {
                 let root_dir_sectors = ((self.bpb.root_entries_cnt as u64 * 32) + self.bytes_per_sec() - 1) / self.bytes_per_sec();
                 let data_sec = self.bpb.total_sectors_16 as u64 - (self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * self.bpb.fat_size_16 as u64) + root_dir_sectors);
                 let tot_clusters = data_sec / self.bpb.sectors_per_cluster as u64;
-                Cluster::new(tot_clusters + 1)
+                Cluster::new(tot_clusters + RESERVED_CLUSTERS - 1)
             }
         }
     }
