@@ -10,7 +10,7 @@ use std::cmp::{Eq, PartialEq, Ord, PartialOrd, Ordering};
 use BiosParameterBlock;
 //use disk::Disk;
 use bpb::FATType;
-use table::{FatEntry, get_entry, get_entry_raw};
+use table::{FatEntry, get_entry, get_entry_raw, set_entry};
 use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use dir_entry::Dir;
 
@@ -64,7 +64,9 @@ struct Sector {
     number: u64
 }
 
-#[derive(Default, Debug, Copy, Clone)]
+/// An in-memory copy of FsInfo Struct for FAT32
+/// Flushed out to disk on unmounting the volume
+#[derive(Debug, Copy, Clone)]
 pub struct FsInfo {
     /// Lead Signature - must equal 0x41615252
     lead_sig: u32,
@@ -79,7 +81,8 @@ pub struct FsInfo {
     /// Dirty flag to flush to disk
     dirty: bool,
     /// Relative Offset of FsInfo Structure
-    offset: u64
+    /// Not present for FAT12 and FAT16
+    offset: Option<u64>
 }
 
 impl FsInfo {
@@ -103,7 +106,7 @@ impl FsInfo {
         disk.seek(SeekFrom::Current(12))?;
         fsinfo.trail_sig = disk.read_u32::<LittleEndian>()?;
         fsinfo.dirty = false;
-        fsinfo.offset = offset;
+        fsinfo.offset = Some(offset);
 
         if fsinfo.is_valid() {
             Ok(fsinfo)
@@ -114,38 +117,68 @@ impl FsInfo {
     }
 
     pub fn update<D: Read + Seek>(&mut self, disk: &mut D) -> Result<()> {
-        disk.seek(SeekFrom::Start(self.offset))?;
-        self.lead_sig = disk.read_u32::<LittleEndian>()?;
-        disk.seek(SeekFrom::Current(480))?;
-        self.struc_sig = disk.read_u32::<LittleEndian>()?;
-        self.free_count = disk.read_u32::<LittleEndian>()?;
-        self.next_free = disk.read_u32::<LittleEndian>()?;
-        disk.seek(SeekFrom::Current(12))?;
-        self.trail_sig = disk.read_u32::<LittleEndian>()?;
+        if let Some(off) = self.offset {
+            disk.seek(SeekFrom::Start(off))?;
+            self.lead_sig = disk.read_u32::<LittleEndian>()?;
+            disk.seek(SeekFrom::Current(480))?;
+            self.struc_sig = disk.read_u32::<LittleEndian>()?;
+            self.free_count = disk.read_u32::<LittleEndian>()?;
+            self.next_free = disk.read_u32::<LittleEndian>()?;
+            disk.seek(SeekFrom::Current(12))?;
+            self.trail_sig = disk.read_u32::<LittleEndian>()?;
+        }
         Ok(())
     }
 
     pub fn flush<D: Write + Seek>(&self, disk: &mut D) -> Result<()> {
-        disk.seek(SeekFrom::Start(self.offset))?;
-        disk.write_u32::<LittleEndian>(self.lead_sig)?;
-        disk.seek(SeekFrom::Current(480))?;
-        disk.write_u32::<LittleEndian>(self.struc_sig)?;
-        disk.write_u32::<LittleEndian>(self.free_count)?;
-        disk.write_u32::<LittleEndian>(self.next_free)?;
-        disk.seek(SeekFrom::Current(12))?;
-        disk.write_u32::<LittleEndian>(self.trail_sig)?;
+        if let Some(off) = self.offset {
+            disk.seek(SeekFrom::Start(off))?;
+            disk.write_u32::<LittleEndian>(self.lead_sig)?;
+            disk.seek(SeekFrom::Current(480))?;
+            disk.write_u32::<LittleEndian>(self.struc_sig)?;
+            disk.write_u32::<LittleEndian>(self.free_count)?;
+            disk.write_u32::<LittleEndian>(self.next_free)?;
+            disk.seek(SeekFrom::Current(12))?;
+            disk.write_u32::<LittleEndian>(self.trail_sig)?;
+        }
         Ok(())
     }
 
-    pub fn get_next_free(&self) -> Option<u64> {
+    pub fn get_next_free(&self, max_cluster: Cluster) -> Option<u64> {
         match self.next_free {
             0xFFFFFFFF => None,
             0 | 1 => None,
             n => Some(n as u64)
         }
     }
+
+    pub fn update_free_count(&mut self, count: u64) {
+        self.free_count = count as u32;
+    }
+
+    pub fn delta_free_count(&mut self, delta: i32) {
+        self.free_count = (self.free_count as i32 + delta) as u32;
+    }
+
+    pub fn update_next_free(&mut self, next_free: u64) {
+        self.next_free = next_free as u32;
+    }
+
 }
 
+impl Default for FsInfo {
+    fn default() -> Self {
+        FsInfo {
+            lead_sig: 0x41615252,
+            struc_sig: 0x61417272,
+            free_count: 0xFFFFFFFF,
+            next_free: 2,
+            trail_sig: 0xAA550000,
+            dirty: false,
+            offset: None
+        }
+    }
+}
 pub struct FileSystem<D: Read + Write + Seek> {
     pub disk: RefCell<D>,
     pub bpb: BiosParameterBlock,
@@ -302,11 +335,11 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         match self.bpb.fat_type {
             FATType::FAT32(_) => {
                 let bit = get_entry_raw(self, Cluster::new(1))? & 0x08000000;
-                Ok(bit == 1)
+                Ok(bit > 0)
             },
             FATType::FAT16(_) => {
                 let bit = get_entry_raw(self, Cluster::new(1))? & 0x8000;
-                Ok(bit == 1)
+                Ok(bit > 0)
             },
             _ => Ok(true)
         }
@@ -316,16 +349,64 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         match self.bpb.fat_type {
             FATType::FAT32(_) => {
                 let bit = get_entry_raw(self, Cluster::new(1))? & 0x04000000;
-                Ok(bit == 1)
+                Ok(bit > 0)
             },
             FATType::FAT16(_) => {
                 let bit = get_entry_raw(self, Cluster::new(1))? & 0x4000;
-                Ok(bit == 1)
+                Ok(bit > 0)
             },
             _ => Ok(true)
         }
     }
 
+    pub fn set_clean_shut_bit(&mut self) -> Result<()> {
+        match self.bpb.fat_type {
+            FATType::FAT32(_) => {
+                let raw_entry = get_entry_raw(self, Cluster::new(1))? | 0x08000000;
+                set_entry(self, Cluster::new(1), FatEntry::Next(Cluster::new(raw_entry)))?;
+                Ok(())
+            },
+            FATType::FAT16(_) => {
+                let raw_entry = get_entry_raw(self, Cluster::new(1))? | 0x8000;
+                set_entry(self, Cluster::new(1), FatEntry::Next(Cluster::new(raw_entry)))?;
+                Ok(())
+            },
+            _ => Ok(())
+        }
+    }
+
+    pub fn set_hard_error_bit(&mut self) -> Result<()> {
+        match self.bpb.fat_type {
+            FATType::FAT32(_) => {
+                let raw_entry = get_entry_raw(self, Cluster::new(1))? | 0x04000000;
+                set_entry(self, Cluster::new(1), FatEntry::Next(Cluster::new(raw_entry)))?;
+                Ok(())
+            },
+            FATType::FAT16(_) => {
+                let raw_entry = get_entry_raw(self, Cluster::new(1))? | 0x4000;
+                set_entry(self, Cluster::new(1), FatEntry::Next(Cluster::new(raw_entry)))?;
+                Ok(())
+            },
+            _ => Ok(())
+        }
+    }
+
+    pub fn unmount(&mut self) -> Result<()> {
+        let fs_info = self.fs_info.borrow_mut();
+        fs_info.flush(self.disk.get_mut())?;
+        drop(fs_info);
+
+        self.set_clean_shut_bit()?;
+        self.set_hard_error_bit()?;
+        Ok(())
+    }
+
+}
+
+impl<D: Read + Write + Seek> Drop for FileSystem<D> {
+    fn drop(&mut self) {
+        self.unmount();
+    }
 }
 
 impl Cluster {

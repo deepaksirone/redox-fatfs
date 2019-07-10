@@ -120,7 +120,7 @@ pub fn get_entry<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cluste
             }
         }
     };
-        Ok(res)
+    Ok(res)
 }
 
 pub fn get_entry_raw<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cluster) -> Result<u64> {
@@ -168,12 +168,13 @@ pub fn get_entry_raw<D: Read + Seek + Write>(fs: &mut FileSystem<D>, cluster: Cl
     };
     Ok(res)
 }
+
 pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cluster: Cluster,
                                                 end_cluster: Cluster) -> Result<Cluster> {
 
     let max_cluster = fs.max_cluster_number();
     //println!("[get_free] Max Cluster = {:?}", max_cluster);
-    let mut cluster = min(RESERVED_CLUSTERS, start_cluster.cluster_number);
+    let mut cluster = start_cluster.cluster_number;
     /*
     let fat_offset = match fs.bpb.fat_type {
         FATType::FAT12(_) => cluster + (cluster / 2),
@@ -233,11 +234,11 @@ pub fn get_free_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, start_cl
         },
 
         FATType::FAT32(_) => {
-            let next_free = match fs.fs_info.borrow().get_next_free() {
+            /*let next_free = match fs.fs_info.borrow().get_next_free() {
                 Some(x) => x,
                 None => 0xFFFFFFFF
             };
-            cluster = min(next_free, cluster);
+            cluster = min(next_free, cluster);*/
             let fat_type = fs.bpb.fat_type;
             let fat_start_sector = fs.fat_start_sector();
             let bytes_per_sec = fs.bytes_per_sec();
@@ -295,7 +296,7 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
             let fat_size = fs.fat_size();
             let bound = if fs.mirroring_enabled() { 1 } else { fs.bpb.num_fats as u64 };
             for i in 0..bound {
-                fs.seek_to(fat_offset + i as u64 * fat_size);
+                fs.seek_to(fat_offset + i * fat_size);
                 let old_bits = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0xF0000000;
                 if fat_entry == FatEntry::Unused && cluster.cluster_number >= 0x0FFFFFF7 && cluster.cluster_number <= 0x0FFFFFFF {
                     warn!("Reserved Cluster {:?} cannot be marked as free", cluster);
@@ -317,6 +318,7 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
     }
 }
 
+
 pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluster: Cluster) -> Result<u64> {
     let mut count = 0;
     let mut cluster = RESERVED_CLUSTERS;
@@ -332,6 +334,7 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
                 }
                 cluster += 1;
                 if cluster == end_cluster.cluster_number {
+                    fs.fs_info.borrow_mut().update_free_count(count);
                     return Ok(count)
                 }
                 packed_val = match cluster & 1 {
@@ -353,6 +356,7 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
                 }
                 cluster += 1;
             }
+            fs.fs_info.borrow_mut().update_free_count(count);
             Ok(count)
         },
         FATType::FAT32(_) => {
@@ -365,6 +369,7 @@ pub fn get_free_count<D: Read + Write + Seek>(fs: &mut FileSystem<D>, end_cluste
                 }
                 cluster += 1;
             }
+            fs.fs_info.borrow_mut().update_free_count(count);
             Ok(count)
         }
     }
@@ -375,7 +380,7 @@ pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_clu
     let end_cluster = fs.max_cluster_number();
     let mut start_cluster = match fs.bpb.fat_type {
         FATType::FAT32(_) => {
-            let next_free = match fs.fs_info.borrow().get_next_free() {
+            let next_free = match fs.fs_info.borrow().get_next_free(end_cluster) {
                 Some(x) => x,
                 None => 0xFFFFFFFF
             };
@@ -388,6 +393,7 @@ pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_clu
         _ => Cluster::new(RESERVED_CLUSTERS),
 
     };
+
     let free_cluster = match get_free_cluster(fs, start_cluster, end_cluster) {
         Ok(c) => c,
         Err(_) if start_cluster.cluster_number > RESERVED_CLUSTERS => get_free_cluster(fs, Cluster::new(RESERVED_CLUSTERS), end_cluster)?,
@@ -395,6 +401,8 @@ pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_clu
     };
 
     set_entry(fs, free_cluster, FatEntry::EndOfChain)?;
+    fs.fs_info.borrow_mut().delta_free_count(-1);
+    fs.fs_info.borrow_mut().update_next_free(free_cluster.cluster_number + 1);
     if let Some(prev_clus) = prev_cluster {
         set_entry(fs, prev_clus, FatEntry::Next(free_cluster))?;
     }
@@ -405,6 +413,7 @@ pub fn deallocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluste
     let entry = get_entry(fs, cluster)?;
     if entry != FatEntry::Bad {
         set_entry(fs, cluster, FatEntry::Unused)?;
+        fs.fs_info.borrow_mut().delta_free_count(1);
         Ok(())
     }
     else {

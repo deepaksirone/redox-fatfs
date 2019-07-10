@@ -25,6 +25,8 @@ fn print_fat32() {
     let max_cluster = fs.max_cluster_number();
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
     println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(14)));
+    println!("Clean shut bit = {:?}", fs.clean_shut_bit());
+    println!("Hard Error bit = {:?}", fs.hard_error_bit());
 
 }
 
