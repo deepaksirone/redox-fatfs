@@ -153,7 +153,7 @@ impl FsInfo {
     }
 
     pub fn get_free_count(&self, max_cluster: Cluster) -> Option<u64> {
-        let count_clusters = max_cluster.cluster_number - 1;
+        let count_clusters = max_cluster.cluster_number - RESERVED_CLUSTERS + 1;
         if self.free_count as u64 > count_clusters {
             None
         }
@@ -185,7 +185,7 @@ impl Default for FsInfo {
             lead_sig: 0x41615252,
             struc_sig: 0x61417272,
             free_count: 0xFFFFFFFF,
-            next_free: 2,
+            next_free: RESERVED_CLUSTERS as u32,
             trail_sig: 0xAA550000,
             dirty: false,
             offset: None
@@ -405,12 +405,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn unmount(&mut self) -> Result<()> {
-        let fs_info = self.fs_info.borrow_mut();
-        fs_info.flush(self.disk.get_mut())?;
-        drop(fs_info);
-
+        self.fs_info.borrow_mut().flush(self.disk.get_mut())?;
         self.set_clean_shut_bit()?;
         self.set_hard_error_bit()?;
+        self.disk.borrow_mut().flush();
         Ok(())
     }
 
