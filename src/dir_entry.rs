@@ -1,3 +1,4 @@
+use Cluster;
 
 bitflags! {
 
@@ -15,18 +16,29 @@ bitflags! {
 }
 
 pub struct File {
-    pub first_cluster : u64,
-    pub current_cluster : u64,
-    pub filepath : String,
-    pub offset : u64,
+    pub first_cluster : Cluster,
+    pub file_path : String,
+    pub fname: String,
+    pub create_time: u16,
+    pub create_date: u16,
+    pub lst_acc_date: u16,
+    pub last_write_time: u16,
+    pub last_write_date: u16,
+    pub file_size: u64
+
     // FIXME: Add pointer to directory entry
 }
 
 pub struct Dir {
-    pub first_cluster: u64,
-    pub current_cluster: u64,
-    pub dirpath : String,
-    pub offset: u64,
+    pub first_cluster: Cluster,
+    pub attributes: FileAttributes,
+    pub dir_path: String,
+    pub dir_name: String,
+    pub create_time: u16,
+    pub create_date: u16,
+    pub lst_acc_date: u16,
+    pub last_write_time: u16,
+    pub last_write_date: u16
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -79,6 +91,17 @@ pub struct LongDirEntry {
     name3: [u8; 4]
 }
 
-pub enum DirEntry {
+pub enum DirEntryRaw {
+    Short(ShortDirEntry),
+    Long(LongDirEntry)
+}
 
+impl ShortDirEntry {
+    fn compute_checksum(&self) -> u8 {
+        let mut sum = 0;
+        for b in &self.dir_name {
+            sum = if (sum & 1) > 0 { 0x80 } else { 0 } + (sum >> 1) + b;
+        }
+        sum
+    }
 }
