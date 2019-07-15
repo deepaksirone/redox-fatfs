@@ -96,6 +96,11 @@ pub enum DirEntryRaw {
     Long(LongDirEntry)
 }
 
+pub enum DirEntry {
+    File(File),
+    Dir(Dir)
+}
+
 impl ShortDirEntry {
     fn compute_checksum(&self) -> u8 {
         let mut sum = 0;
