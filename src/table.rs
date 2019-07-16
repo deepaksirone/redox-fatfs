@@ -296,7 +296,7 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
             let fat_size = fs.fat_size();
             let bound = if fs.mirroring_enabled() { 1 } else { fs.bpb.num_fats as u64 };
             for i in 0..bound {
-                fs.seek_to(fat_offset + i * fat_size);
+                fs.seek_to(fat_offset + i * fat_size)?;
                 let old_bits = fs.disk.borrow_mut().read_u32::<LittleEndian>()? & 0xF0000000;
                 if fat_entry == FatEntry::Unused && cluster.cluster_number >= 0x0FFFFFF7 && cluster.cluster_number <= 0x0FFFFFFF {
                     warn!("Reserved Cluster {:?} cannot be marked as free", cluster);
@@ -309,7 +309,7 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
                     FatEntry::Next(c) => c.cluster_number as u32
                 };
                 raw_val = raw_val | old_bits;
-                fs.seek_to(fat_offset + i as u64 * fat_size);
+                fs.seek_to(fat_offset + i as u64 * fat_size)?;
                 fs.disk.borrow_mut().write_u32::<LittleEndian>(raw_val)?;
             }
             Ok(())

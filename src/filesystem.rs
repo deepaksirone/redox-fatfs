@@ -277,6 +277,13 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         Ok(0)
     }
 
+    pub fn seek_to_cluster(&mut self, cluster: Cluster) -> Result<usize> {
+        let bytes_per_sec = self.bytes_per_sec();
+        let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
+        self.disk.borrow_mut().seek(SeekFrom::Start(first_sec_cluster * bytes_per_sec))?;
+        Ok(0)
+    }
+
     pub fn fat_size(&self) -> u64 {
         if self.bpb.fat_size_16 != 0 { self.bpb.fat_size_16 as u64 }
         else {
@@ -300,6 +307,24 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
     pub fn sectors_per_cluster(&self) -> u64 {
         self.bpb.sectors_per_cluster as u64
+    }
+
+    pub fn bytes_per_cluster(&self) -> u64 {
+        self.bytes_per_sec() * self.sectors_per_cluster()
+    }
+
+    pub fn root_dir_offset(&self) -> u64 {
+        match self.bpb.fat_type {
+            FATType::FAT32(s) => {
+                let bytes_per_sec = self.bytes_per_sec();
+                let first_sec_cluster = (s.root_cluster as u64 - 2) * self.sectors_per_cluster() + self.first_data_sec;
+                first_sec_cluster * self.bytes_per_sec()
+            },
+            _ => {
+                let root_sec = self.bpb.rsvd_sec_cnt as u64 + (self.bpb.num_fats as u64 * self.bpb.fat_size_16 as u64);
+                root_sec * self.bytes_per_sec()
+            }
+        }
     }
 
     pub fn mirroring_enabled(&self) -> bool {
@@ -408,7 +433,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.fs_info.borrow_mut().flush(self.disk.get_mut())?;
         self.set_clean_shut_bit()?;
         self.set_hard_error_bit()?;
-        self.disk.borrow_mut().flush();
+        self.disk.borrow_mut().flush()?;
         Ok(())
     }
 

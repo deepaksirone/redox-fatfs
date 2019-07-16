@@ -30,6 +30,11 @@ fn print_fat32() {
     println!("Clean shut bit = {:?}", fs.clean_shut_bit());
     println!("Hard Error bit = {:?}", fs.hard_error_bit());
 
+    let dir_start = fs.root_dir_offset();
+    println!("First Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start).unwrap());
+    println!("Second Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 32).unwrap());
+    println!("Third Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 64).unwrap());
+
 }
 
 
