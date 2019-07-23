@@ -327,6 +327,18 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         }
     }
 
+    
+    // Returns zero when the cluster offset makes no sense
+    pub fn cluster_offset(&self, cluster: Cluster) -> u64 {
+        let bytes_per_sec = self.bytes_per_sec();
+        if cluster.cluster_number >= 2 {
+            let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
+            first_sec_cluster * self.bytes_per_sec()
+        } else {
+            0
+        }
+    }
+
     pub fn mirroring_enabled(&self) -> bool {
         match self.bpb.fat_type {
             FATType::FAT32(s) => s.ext_flags & 0x80 == 0,

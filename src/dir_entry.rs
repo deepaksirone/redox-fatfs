@@ -1,17 +1,17 @@
-use Cluster;
-use filesystem::FileSystem;
 use std::io::{Read, Write, Seek, SeekFrom};
 use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
 use std::fmt;
-
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+use Cluster;
+use filesystem::FileSystem;
 use table::{FatEntry, get_entry};
 
 use super::Result;
 
 pub const DIR_ENTRY_LEN: u64 = 32;
+pub const LFN_PART_LEN: usize = 13;
 
 bitflags! {
     #[derive(Default)]
@@ -33,7 +33,8 @@ pub struct File {
     pub file_path : String,
     pub fname: String,
     pub short_dir_entry: ShortDirEntry,
-
+    /// Starting and ending offsets of directory entries
+    pub loc: ((Cluster, u64), (Cluster, u64))
     // FIXME: Add pointer to directory entry
 }
 
@@ -42,7 +43,12 @@ pub struct Dir {
     pub first_cluster: Cluster,
     pub dir_path: String,
     pub dir_name: String,
-    pub short_dir_entry: ShortDirEntry
+    pub short_dir_entry: ShortDirEntry,
+    pub loc: Option<((Cluster, u64), (Cluster, u64))>
+}
+
+pub struct DirRange {
+
 }
 
 impl Dir {
@@ -89,7 +95,7 @@ pub struct LongDirEntry {
     /// Ordinal of the entry
     ord: u8,
     /// Characters 1-5 of name
-    name1: [u8; 10],
+    name1: [u16; 5],
     /// File Attributes
     file_attrs: FileAttributes,
     /// Entry Type: If zero indicates that the entry
@@ -99,12 +105,33 @@ pub struct LongDirEntry {
     /// Checksum computed from short name
     chksum: u8,
     /// Characters 6-11 of name
-    name2: [u8; 10],
+    name2: [u16; 6],
     /// FirstCluster Low Word
     /// Should be zero in a long file entry
     first_clus_low: u16,
     /// Characters 12-13 of name
-    name3: [u8; 4]
+    name3: [u16; 2]
+}
+
+impl LongDirEntry {
+    pub fn is_last(&self) -> bool {
+        self.ord & 0x40 > 0
+    }
+
+    pub fn copy_name_to_slice(&self, name_part: &mut [u16]) {
+        debug_assert!(name_part.len() == LFN_PART_LEN);
+        name_part[0..5].copy_from_slice(&self.name1);
+        name_part[5..11].copy_from_slice(&self.name2);
+        name_part[11..13].copy_from_slice(&self.name3);
+    }
+
+    pub fn order(&self) -> u8 {
+        self.ord
+    }
+
+    pub fn chksum(&self) -> u8 {
+        self.chksum
+    }
 }
 
 impl ShortDirEntry {
@@ -139,7 +166,7 @@ impl ShortDirEntry {
         String::from_iter(iter)
     }
 
-    pub fn to_dir_entry(&self, dir_path: &String) -> DirEntry{
+    pub fn to_dir_entry(&self, loc: (Cluster, u64), dir_path: &String) -> DirEntry{
         if !self.file_attrs.contains(FileAttributes::DIRECTORY) {
             let mut file = File::default();
             let f_name = self.name_to_string();
@@ -151,6 +178,7 @@ impl ShortDirEntry {
             file.file_path = f_path;
             file.fname = f_name;
             file.short_dir_entry = self.clone();
+            file.loc = (loc, loc);
             DirEntry::File(file)
         } else {
             let mut dir = Dir::default();
@@ -163,6 +191,36 @@ impl ShortDirEntry {
             dir.dir_path = d_path;
             dir.dir_name = dir_name;
             dir.short_dir_entry = self.clone();
+            dir.loc = Some((loc, loc));
+            DirEntry::Dir(dir)
+        }
+
+    }
+
+    pub fn to_dir_entry_lfn(&self, name: String, loc: ((Cluster, u64), (Cluster, u64)), dir_path: &String) -> DirEntry {
+        if !self.file_attrs.contains(FileAttributes::DIRECTORY) {
+            let mut file = File::default();
+            let mut f_path = dir_path.clone();
+            f_path.push('/');
+            f_path.push_str(&name.clone());
+            let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
+            file.first_cluster = cluster;
+            file.file_path = f_path;
+            file.fname = name;
+            file.short_dir_entry = self.clone();
+            file.loc = loc;
+            DirEntry::File(file)
+        } else {
+            let mut dir = Dir::default();
+            let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
+            dir.first_cluster = cluster;
+            let mut d_path = dir_path.clone();
+            d_path.push('/');
+            d_path.push_str(&name.clone());
+            dir.dir_path = d_path;
+            dir.dir_name = name;
+            dir.short_dir_entry = self.clone();
+            dir.loc = Some(loc);
             DirEntry::Dir(dir)
         }
 
@@ -194,6 +252,31 @@ pub enum DirEntryRaw {
     FreeRest
 }
 
+impl DirEntryRaw {
+    pub fn is_last(&self) -> bool {
+        match self {
+            &DirEntryRaw::Short(s) => true,
+            &DirEntryRaw::Long(l) => l.is_last(),
+            _ => false
+        }
+    }
+
+    pub fn is_long(&self) -> bool {
+        match self {
+            &DirEntryRaw::Long(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_short(&self) -> bool {
+        match self {
+            &DirEntryRaw::Short(_) => true,
+            _ => false
+        }
+    }
+
+}
+
 pub struct DirIter<'a, D: Read + Write + Seek> {
     current_cluster: Cluster,
     dir_path: String,
@@ -213,16 +296,117 @@ impl<'a, D: Read + Write + Seek> Iterator for DirIter<'a, D> {
                 _ => return None
             }
         }
-
-        let dir_entry_raw = get_dir_entry_raw(self.fs, self.offset).ok();
-        /*match dir_entry_raw {
-            Some(DirEntryRaw::Short(s)) => {
-
-
-            }
-        }*/
-        None
+        let mut ret: Option<DirEntry>;
+        match get_dir_entry(self.fs, self.current_cluster, self.offset, &self.dir_path) {
+            Ok((offset, cluster, ret)) => {
+                self.offset = offset;
+                self.current_cluster = cluster;
+                ret
+            },
+            Err(e) => None
+        }
     }
+}
+
+
+pub fn get_dir_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, mut current_cluster: Cluster, mut offset: u64, dir_path: &String) -> Result<(u64, Cluster, Option<DirEntry>)> {
+
+    if offset >= fs.bytes_per_cluster() {
+        match get_entry(fs, current_cluster).ok() {
+            Some(FatEntry::Next(c)) => {
+                current_cluster = c;
+                offset = offset % fs.bytes_per_cluster();
+            },
+            _ => return Ok((offset, current_cluster, None))
+        }
+    }
+
+    let mut dentry = get_dir_entry_raw(fs, fs.cluster_offset(current_cluster) + offset)?;
+    match dentry {
+        DirEntryRaw::Short(s) => {
+            Ok((offset + DIR_ENTRY_LEN, current_cluster, Some(s.to_dir_entry((current_cluster, offset), dir_path))))
+        },
+        DirEntryRaw::Long(l) => {
+            // Iterate till a short entry or a free entry
+            // Iterate only till 20 entries as the max file name size is 255
+            let mut lfn_entries = vec![dentry];
+            let start_offset = offset;
+            let start_cluster = current_cluster;
+
+            offset += DIR_ENTRY_LEN;
+
+            for i in 1..20 {
+                if offset >= fs.bytes_per_cluster() {
+                    match get_entry(fs, current_cluster).ok() {
+                        Some(FatEntry::Next(c)) => {
+                            current_cluster = c;
+                            offset = offset % fs.bytes_per_cluster();
+                        },
+                        _ => break
+                    }
+                }
+                let mut dentry = get_dir_entry_raw(fs, fs.cluster_offset(current_cluster) + offset)?;
+                match dentry {
+                    DirEntryRaw::Short(_) => {
+                        lfn_entries.push(dentry);
+                        break;
+                    },
+                    DirEntryRaw::Long(_) => {
+                        lfn_entries.push(dentry);
+                        offset += DIR_ENTRY_LEN;
+                    },
+                    _ => {
+                        break;
+                    }
+                }
+            }
+
+            let dir_entry = construct_dentry(lfn_entries, dir_path, ((start_cluster, start_offset), (current_cluster, offset)));
+            match dir_entry {
+                Ok(d) => return Ok((offset + DIR_ENTRY_LEN, current_cluster, Some(d))),
+                Err(_) => return get_dir_entry(fs, current_cluster, offset + DIR_ENTRY_LEN, dir_path)
+            }
+        },
+        DirEntryRaw::Free => {
+            return get_dir_entry(fs, current_cluster, offset + DIR_ENTRY_LEN, dir_path)
+        },
+        DirEntryRaw::FreeRest => {
+            return Ok((offset, current_cluster, None))
+        }
+    }
+}
+
+fn construct_dentry(mut lfn_entries: Vec<DirEntryRaw>, dir_path: &String, loc: ((Cluster, u64), (Cluster, u64))) -> Result<DirEntry> {
+    if lfn_entries.len() == 0 {
+        return Err(Error::new(ErrorKind::Other, "Empty lfn entries"))
+    }
+
+    if !lfn_entries[0].is_last() || !lfn_entries.last().unwrap().is_short() {
+        return Err(Error::new(ErrorKind::Other, "Orphaned Entries"))
+    }
+
+    let short_entry = match lfn_entries.pop().unwrap() {
+        DirEntryRaw::Short(s) => s,
+        _ => unreachable!()
+    };
+
+    let mut name_builder = LongNameGen::new();
+    for entry in &lfn_entries {
+        match entry {
+            &DirEntryRaw::Short(s) => {
+                return Err(Error::new(ErrorKind::Other, "Orphaned Entries"))
+            },
+            &DirEntryRaw::Long(l) => {
+                name_builder.process(l)?;
+            },
+            _ => return Err(Error::new(ErrorKind::Other, "Orphaned Entries"))
+        }
+    }
+
+    let fname = name_builder.to_string();
+    Ok(short_entry.to_dir_entry_lfn(fname, loc, dir_path))
+
+
 }
 
 pub fn get_dir_entry_raw<D: Read + Write + Seek>(fs: &mut FileSystem<D>, offset: u64) -> Result<DirEntryRaw> {
@@ -239,14 +423,14 @@ pub fn get_dir_entry_raw<D: Read + Write + Seek>(fs: &mut FileSystem<D>, offset:
             if f_attr.contains(FileAttributes::LFN) {
                 let mut ldr = LongDirEntry::default();
                 ldr.ord = fs.disk.borrow_mut().read_u8()?;
-                fs.disk.borrow_mut().read(&mut ldr.name1)?;
+                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name1)?;
                 ldr.file_attrs = FileAttributes::from_bits(fs.disk.borrow_mut().read_u8()?)
                     .ok_or(Error::new(ErrorKind::Other, "Error Reading File Attr"))?;
                 ldr.dirent_type = fs.disk.borrow_mut().read_u8()?;
                 ldr.chksum = fs.disk.borrow_mut().read_u8()?;
-                fs.disk.borrow_mut().read(&mut ldr.name2)?;
+                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name2)?;
                 ldr.first_clus_low = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                fs.disk.borrow_mut().read(&mut ldr.name3)?;
+                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name3)?;
                 Ok(DirEntryRaw::Long(ldr))
             } else {
                 let mut sdr = ShortDirEntry::default();
@@ -276,6 +460,53 @@ pub fn get_dir_entry_raw<D: Read + Write + Seek>(fs: &mut FileSystem<D>, offset:
 pub enum DirEntry {
     File(File),
     Dir(Dir)
+}
+
+struct LongNameGen {
+    name: Vec<u16>,
+    chksum: u8,
+    index: u8
+}
+
+impl LongNameGen {
+    pub fn new() -> Self {
+        LongNameGen {
+            name: Vec::new(),
+            chksum: 0,
+            index: 0
+        }
+    }
+
+    pub fn process(&mut self, lfn: LongDirEntry) -> Result<()> {
+        let is_last = lfn.is_last();
+        let index = lfn.order() & 0x1f;
+        if index == 0 {
+            self.name.clear();
+            return Err(Error::new(ErrorKind::Other, "Orphaned Entries"))
+        }
+        if is_last {
+            self.index = index;
+            self.chksum = lfn.chksum();
+            self.name.resize(index as usize * LFN_PART_LEN, 0);
+        }
+        else if self.index == 0 || index != self.index - 1 || self.chksum != lfn.chksum() {
+            self.name.clear();
+            return Err(Error::new(ErrorKind::Other, "Orphaned Entries"))
+        } else {
+            self.index -= 1;
+        }
+        let pos = (index - 1) as usize * LFN_PART_LEN;
+        lfn.copy_name_to_slice(&mut self.name[pos..pos + LFN_PART_LEN]);
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.name.len()
+    }
+
+    pub fn to_string(&self) -> String {
+        String::from_utf16_lossy(self.name.as_slice())
+    }
 }
 /*
 impl fmt::Debug for DirEntry {
