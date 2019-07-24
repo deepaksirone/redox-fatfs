@@ -41,9 +41,10 @@ pub struct File {
 #[derive(Debug, Default, Clone)]
 pub struct Dir {
     pub first_cluster: Cluster,
+    pub root_offset: Option<u64>,
     pub dir_path: String,
     pub dir_name: String,
-    pub short_dir_entry: ShortDirEntry,
+    pub short_dir_entry: Option<ShortDirEntry>,
     pub loc: Option<((Cluster, u64), (Cluster, u64))>
 }
 
@@ -56,9 +57,14 @@ impl Dir {
         DirIter {
             current_cluster: self.first_cluster,
             dir_path: self.dir_path.clone(),
-            offset: 0,
+            offset: self.root_offset.unwrap_or(0),
+            is_root: self.is_root(),
             fs: fs
         }
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.root_offset.is_some()
     }
 }
 
@@ -190,7 +196,8 @@ impl ShortDirEntry {
             d_path.push_str(&dir_name.clone());
             dir.dir_path = d_path;
             dir.dir_name = dir_name;
-            dir.short_dir_entry = self.clone();
+            dir.root_offset = None;
+            dir.short_dir_entry = Some(self.clone());
             dir.loc = Some((loc, loc));
             DirEntry::Dir(dir)
         }
@@ -219,7 +226,8 @@ impl ShortDirEntry {
             d_path.push_str(&name.clone());
             dir.dir_path = d_path;
             dir.dir_name = name;
-            dir.short_dir_entry = self.clone();
+            dir.root_offset = None;
+            dir.short_dir_entry = Some(self.clone());
             dir.loc = Some(loc);
             DirEntry::Dir(dir)
         }
@@ -281,23 +289,15 @@ pub struct DirIter<'a, D: Read + Write + Seek> {
     current_cluster: Cluster,
     dir_path: String,
     offset: u64,
-    fs: &'a mut FileSystem<D>
+    /// True for the root directories of FAT12 and FAT16
+    is_root: bool,
+    fs: &'a mut FileSystem<D>,
 }
 
 impl<'a, D: Read + Write + Seek> Iterator for DirIter<'a, D> {
     type Item = DirEntry;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.fs.bytes_per_cluster() {
-            match get_entry(self.fs, self.current_cluster).ok() {
-                Some(FatEntry::Next(c)) => {
-                    self.current_cluster = c;
-                    self.offset = self.offset % self.fs.bytes_per_cluster();
-                },
-                _ => return None
-            }
-        }
-        let mut ret: Option<DirEntry>;
-        match get_dir_entry(self.fs, self.current_cluster, self.offset, &self.dir_path) {
+        match self.get_dir_entry() {
             Ok((offset, cluster, ret)) => {
                 self.offset = offset;
                 self.current_cluster = cluster;
@@ -308,71 +308,92 @@ impl<'a, D: Read + Write + Seek> Iterator for DirIter<'a, D> {
     }
 }
 
+impl<'a, D: Read + Write + Seek> DirIter <'a, D>{
+    pub fn get_dir_entry(&mut self) -> Result<(u64, Cluster, Option<DirEntry>)> {
+        if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
+            match get_entry(self.fs, self.current_cluster).ok() {
+                Some(FatEntry::Next(c)) => {
+                    self.current_cluster = c;
+                    self.offset = self.offset % self.fs.bytes_per_cluster();
+                },
+                _ => return Ok((self.offset, self.current_cluster, None))
+            }
+        }
 
-pub fn get_dir_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, mut current_cluster: Cluster, mut offset: u64, dir_path: &String) -> Result<(u64, Cluster, Option<DirEntry>)> {
+        if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
+            return Ok((self.offset, self.current_cluster, None))
+        }
 
-    if offset >= fs.bytes_per_cluster() {
-        match get_entry(fs, current_cluster).ok() {
-            Some(FatEntry::Next(c)) => {
-                current_cluster = c;
-                offset = offset % fs.bytes_per_cluster();
+        let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+        match dentry {
+            DirEntryRaw::Short(s) => {
+                self.offset = self.offset + DIR_ENTRY_LEN;
+                Ok((self.offset, self.current_cluster, Some(s.to_dir_entry((self.current_cluster, self.offset - DIR_ENTRY_LEN), &self.dir_path))))
             },
-            _ => return Ok((offset, current_cluster, None))
+            DirEntryRaw::Long(l) => {
+                // Iterate till a short entry or a free entry
+                // Iterate only till 20 entries as the max file name size is 255
+                let mut lfn_entries = vec![dentry];
+                let start_offset = self.offset;
+                let start_cluster = self.current_cluster;
+
+                self.offset += DIR_ENTRY_LEN;
+
+                for i in 1..20 {
+                    if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
+                        match get_entry(self.fs, self.current_cluster).ok() {
+                            Some(FatEntry::Next(c)) => {
+                                self.current_cluster = c;
+                                self.offset = self.offset % self.fs.bytes_per_cluster();
+                            },
+                            _ => break
+                        }
+                    }
+
+                    if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
+                        break;
+                    }
+
+                    let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+                    match dentry {
+                        DirEntryRaw::Short(_) => {
+                            lfn_entries.push(dentry);
+                            break;
+                        },
+                        DirEntryRaw::Long(_) => {
+                            lfn_entries.push(dentry);
+                            self.offset += DIR_ENTRY_LEN;
+                        },
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+
+                let dir_entry = construct_dentry(lfn_entries, &self.dir_path, ((start_cluster, start_offset), (self.current_cluster, self.offset)));
+                match dir_entry {
+                    Ok(d) => {
+                        self.offset = self.offset + DIR_ENTRY_LEN;
+                        return Ok((self.offset, self.current_cluster, Some(d)))
+                    },
+                    Err(_) => {
+                        self.offset = self.offset + DIR_ENTRY_LEN;
+                        return self.get_dir_entry()
+                    }
+                }
+            },
+            DirEntryRaw::Free => {
+                self.offset = self.offset + DIR_ENTRY_LEN;
+                return self.get_dir_entry()
+            },
+            DirEntryRaw::FreeRest => {
+                return Ok((self.offset, self.current_cluster, None))
+            }
         }
     }
 
-    let mut dentry = get_dir_entry_raw(fs, fs.cluster_offset(current_cluster) + offset)?;
-    match dentry {
-        DirEntryRaw::Short(s) => {
-            Ok((offset + DIR_ENTRY_LEN, current_cluster, Some(s.to_dir_entry((current_cluster, offset), dir_path))))
-        },
-        DirEntryRaw::Long(l) => {
-            // Iterate till a short entry or a free entry
-            // Iterate only till 20 entries as the max file name size is 255
-            let mut lfn_entries = vec![dentry];
-            let start_offset = offset;
-            let start_cluster = current_cluster;
-
-            offset += DIR_ENTRY_LEN;
-
-            for i in 1..20 {
-                if offset >= fs.bytes_per_cluster() {
-                    match get_entry(fs, current_cluster).ok() {
-                        Some(FatEntry::Next(c)) => {
-                            current_cluster = c;
-                            offset = offset % fs.bytes_per_cluster();
-                        },
-                        _ => break
-                    }
-                }
-                let mut dentry = get_dir_entry_raw(fs, fs.cluster_offset(current_cluster) + offset)?;
-                match dentry {
-                    DirEntryRaw::Short(_) => {
-                        lfn_entries.push(dentry);
-                        break;
-                    },
-                    DirEntryRaw::Long(_) => {
-                        lfn_entries.push(dentry);
-                        offset += DIR_ENTRY_LEN;
-                    },
-                    _ => {
-                        break;
-                    }
-                }
-            }
-
-            let dir_entry = construct_dentry(lfn_entries, dir_path, ((start_cluster, start_offset), (current_cluster, offset)));
-            match dir_entry {
-                Ok(d) => return Ok((offset + DIR_ENTRY_LEN, current_cluster, Some(d))),
-                Err(_) => return get_dir_entry(fs, current_cluster, offset + DIR_ENTRY_LEN, dir_path)
-            }
-        },
-        DirEntryRaw::Free => {
-            return get_dir_entry(fs, current_cluster, offset + DIR_ENTRY_LEN, dir_path)
-        },
-        DirEntryRaw::FreeRest => {
-            return Ok((offset, current_cluster, None))
-        }
+    fn is_root(&self) -> bool {
+        self.is_root
     }
 }
 

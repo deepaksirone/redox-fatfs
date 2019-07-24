@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-#[test]
+
 fn print_fat32() {
     let mut f = fs::File::open("images/fat32.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -34,6 +34,11 @@ fn print_fat32() {
     println!("First Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start).unwrap());
     println!("Second Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 32).unwrap());
     println!("Third Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 64).unwrap());
+    let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    for entry in root_dir  {
+        println!("Dir Entry : {:?}\n", entry);
+    }
+
 
 }
 
@@ -62,10 +67,14 @@ fn print_fat12() {
     let max_cluster = fs.max_cluster_number();
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
     println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(3)));
+    let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    for entry in root_dir  {
+        println!("Dir Entry : {:?}\n", entry);
+    }
 
 }
 
-
+#[test]
 fn print_fat16() {
     let mut f = fs::File::open("images/fat16.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -90,5 +99,9 @@ fn print_fat16() {
     println!("Free Cluster = {:?}", free);
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
     println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(3)));
+    let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    for entry in root_dir  {
+        println!("Dir Entry : {:?}\n", entry);
+    }
 }
 

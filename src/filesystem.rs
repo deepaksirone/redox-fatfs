@@ -327,7 +327,38 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         }
     }
 
-    
+    pub fn root_dir_end_offset(&self) -> Option<u64> {
+        match self.bpb.fat_type {
+            FATType::FAT16(_) | FATType::FAT12(_) => Some(self.root_dir_offset() + (self.bpb.root_entries_cnt as u64 * 32)),
+            _ => None
+        }
+    }
+
+    pub fn root_dir(&mut self) -> Dir {
+        match self.bpb.fat_type {
+            FATType::FAT32(s) => {
+                Dir {
+                    first_cluster: Cluster::new(s.root_cluster as u64),
+                    dir_path: "/".to_string(),
+                    dir_name: String::new(),
+                    root_offset: None,
+                    short_dir_entry: None,
+                    loc: None
+                }
+            },
+            _ => {
+                Dir {
+                    first_cluster: Cluster::new(0),
+                    dir_path: "/".to_string(),
+                    dir_name: String::new(),
+                    root_offset: Some(self.root_dir_offset()),
+                    short_dir_entry: None,
+                    loc: None
+                }
+            }
+        }
+    }
+
     // Returns zero when the cluster offset makes no sense
     pub fn cluster_offset(&self, cluster: Cluster) -> u64 {
         let bytes_per_sec = self.bytes_per_sec();
