@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-
+#[test]
 fn print_fat32() {
     let mut f = fs::File::open("images/fat32.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -36,8 +36,24 @@ fn print_fat32() {
     println!("Third Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 64).unwrap());
     let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
     for entry in root_dir  {
+
         println!("Dir Entry : {:?}\n", entry);
+        match entry {
+            DirEntry::File(f) => {
+                let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
+                println!("Upper case filename: {:?}", tmp)
+            },
+            DirEntry::Dir(d) => {
+                let mut tmp: String = d.dir_name.chars().flat_map(|c| c.to_uppercase()).collect();
+                tmp.retain(|c| (c != '\u{0}') && (c != '\u{FFFF}'));
+                let m = tmp.chars().eq(d.dir_name.chars().flat_map(|c| c.to_uppercase()));
+                println!("Upper case dirname: {:?}, match = {}", tmp, m)
+            }
+        }
     }
+    let s = "//this/is/a/path.txt".to_string();
+    let t : Vec<&str> = s.split('/').collect();
+    println!("Split string : {:?}", t);
 
 
 }
@@ -74,7 +90,7 @@ fn print_fat12() {
 
 }
 
-#[test]
+
 fn print_fat16() {
     let mut f = fs::File::open("images/fat16.img").unwrap();
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");

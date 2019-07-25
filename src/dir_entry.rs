@@ -1,7 +1,7 @@
 use std::io::{Read, Write, Seek, SeekFrom};
 use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
-use std::fmt;
+use std::{num, fmt, str};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Cluster;
@@ -66,6 +66,8 @@ impl Dir {
     pub fn is_root(&self) -> bool {
         self.root_offset.is_some()
     }
+
+   // pub fn find_entry(&self, name: &str, )
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -235,11 +237,11 @@ impl ShortDirEntry {
     }
 
     fn compute_checksum(&self) -> u8 {
-        let mut sum = 0;
+        let mut sum = num::Wrapping(0u8);
         for b in &self.dir_name {
-            sum = if (sum & 1) > 0 { 0x80 } else { 0 } + (sum >> 1) + b;
+            sum = (sum << 7) + (sum >> 1) + num::Wrapping(*b);
         }
-        sum
+        sum.0
     }
 
 }
@@ -261,7 +263,7 @@ pub enum DirEntryRaw {
 }
 
 impl DirEntryRaw {
-    pub fn is_last(&self) -> bool {
+    fn is_last(&self) -> bool {
         match self {
             &DirEntryRaw::Short(s) => true,
             &DirEntryRaw::Long(l) => l.is_last(),
@@ -269,14 +271,14 @@ impl DirEntryRaw {
         }
     }
 
-    pub fn is_long(&self) -> bool {
+    fn is_long(&self) -> bool {
         match self {
             &DirEntryRaw::Long(_) => true,
             _ => false
         }
     }
 
-    pub fn is_short(&self) -> bool {
+    fn is_short(&self) -> bool {
         match self {
             &DirEntryRaw::Short(_) => true,
             _ => false
@@ -309,85 +311,88 @@ impl<'a, D: Read + Write + Seek> Iterator for DirIter<'a, D> {
 }
 
 impl<'a, D: Read + Write + Seek> DirIter <'a, D>{
-    pub fn get_dir_entry(&mut self) -> Result<(u64, Cluster, Option<DirEntry>)> {
-        if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
-            match get_entry(self.fs, self.current_cluster).ok() {
-                Some(FatEntry::Next(c)) => {
-                    self.current_cluster = c;
-                    self.offset = self.offset % self.fs.bytes_per_cluster();
-                },
-                _ => return Ok((self.offset, self.current_cluster, None))
-            }
-        }
+    fn get_dir_entry(&mut self) -> Result<(u64, Cluster, Option<DirEntry>)> {
 
-        if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
-            return Ok((self.offset, self.current_cluster, None))
-        }
-
-        let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
-        match dentry {
-            DirEntryRaw::Short(s) => {
-                self.offset = self.offset + DIR_ENTRY_LEN;
-                Ok((self.offset, self.current_cluster, Some(s.to_dir_entry((self.current_cluster, self.offset - DIR_ENTRY_LEN), &self.dir_path))))
-            },
-            DirEntryRaw::Long(l) => {
-                // Iterate till a short entry or a free entry
-                // Iterate only till 20 entries as the max file name size is 255
-                let mut lfn_entries = vec![dentry];
-                let start_offset = self.offset;
-                let start_cluster = self.current_cluster;
-
-                self.offset += DIR_ENTRY_LEN;
-
-                for i in 1..20 {
-                    if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
-                        match get_entry(self.fs, self.current_cluster).ok() {
-                            Some(FatEntry::Next(c)) => {
-                                self.current_cluster = c;
-                                self.offset = self.offset % self.fs.bytes_per_cluster();
-                            },
-                            _ => break
-                        }
-                    }
-
-                    if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
-                        break;
-                    }
-
-                    let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
-                    match dentry {
-                        DirEntryRaw::Short(_) => {
-                            lfn_entries.push(dentry);
-                            break;
-                        },
-                        DirEntryRaw::Long(_) => {
-                            lfn_entries.push(dentry);
-                            self.offset += DIR_ENTRY_LEN;
-                        },
-                        _ => {
-                            break;
-                        }
-                    }
-                }
-
-                let dir_entry = construct_dentry(lfn_entries, &self.dir_path, ((start_cluster, start_offset), (self.current_cluster, self.offset)));
-                match dir_entry {
-                    Ok(d) => {
-                        self.offset = self.offset + DIR_ENTRY_LEN;
-                        return Ok((self.offset, self.current_cluster, Some(d)))
+        loop {
+            if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
+                match get_entry(self.fs, self.current_cluster).ok() {
+                    Some(FatEntry::Next(c)) => {
+                        self.current_cluster = c;
+                        self.offset = self.offset % self.fs.bytes_per_cluster();
                     },
-                    Err(_) => {
-                        self.offset = self.offset + DIR_ENTRY_LEN;
-                        return self.get_dir_entry()
-                    }
+                    _ => return Ok((self.offset, self.current_cluster, None))
                 }
-            },
-            DirEntryRaw::Free => {
-                self.offset = self.offset + DIR_ENTRY_LEN;
-                return self.get_dir_entry()
-            },
-            DirEntryRaw::FreeRest => {
+            }
+
+            if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
                 return Ok((self.offset, self.current_cluster, None))
+            }
+
+            let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+            match dentry {
+                DirEntryRaw::Short(s) => {
+                    self.offset = self.offset + DIR_ENTRY_LEN;
+                    return Ok((self.offset, self.current_cluster, Some(s.to_dir_entry((self.current_cluster, self.offset - DIR_ENTRY_LEN), &self.dir_path))))
+                },
+                DirEntryRaw::Long(l) => {
+                    // Iterate till a short entry or a free entry
+                    // Iterate only till 20 entries as the max file name size is 255
+                    let mut lfn_entries = vec![dentry];
+                    let start_offset = self.offset;
+                    let start_cluster = self.current_cluster;
+
+                    self.offset += DIR_ENTRY_LEN;
+
+                    for i in 1..20 {
+                        if self.offset >= self.fs.bytes_per_cluster() && !self.is_root() {
+                            match get_entry(self.fs, self.current_cluster).ok() {
+                                Some(FatEntry::Next(c)) => {
+                                    self.current_cluster = c;
+                                    self.offset = self.offset % self.fs.bytes_per_cluster();
+                                },
+                                _ => break
+                            }
+                        }
+
+                        if self.is_root() && self.offset > self.fs.root_dir_end_offset().unwrap() {
+                            break;
+                        }
+
+                        let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+                        match dentry {
+                            DirEntryRaw::Short(_) => {
+                                lfn_entries.push(dentry);
+                                break;
+                            },
+                            DirEntryRaw::Long(_) => {
+                                lfn_entries.push(dentry);
+                                self.offset += DIR_ENTRY_LEN;
+                            },
+                            _ => {
+                                break;
+                            }
+                        }
+                    }
+
+                    let dir_entry = construct_dentry(lfn_entries, &self.dir_path, ((start_cluster, start_offset), (self.current_cluster, self.offset)));
+                    match dir_entry {
+                        Ok(d) => {
+                            self.offset = self.offset + DIR_ENTRY_LEN;
+                            return Ok((self.offset, self.current_cluster, Some(d)))
+                        },
+                        Err(_) => {
+                            self.offset = self.offset + DIR_ENTRY_LEN;
+                            //return self.get_dir_entry()
+                        }
+                    }
+                },
+                DirEntryRaw::Free => {
+                    self.offset = self.offset + DIR_ENTRY_LEN;
+                    //return self.get_dir_entry()
+                },
+                DirEntryRaw::FreeRest => {
+                    return Ok((self.offset, self.current_cluster, None))
+                }
             }
         }
     }
@@ -424,6 +429,7 @@ fn construct_dentry(mut lfn_entries: Vec<DirEntryRaw>, dir_path: &String, loc: (
         }
     }
 
+    name_builder.validate_checksum(&short_entry)?;
     let fname = name_builder.to_string();
     Ok(short_entry.to_dir_entry_lfn(fname, loc, dir_path))
 
@@ -490,7 +496,7 @@ struct LongNameGen {
 }
 
 impl LongNameGen {
-    pub fn new() -> Self {
+    fn new() -> Self {
         LongNameGen {
             name: Vec::new(),
             chksum: 0,
@@ -498,7 +504,7 @@ impl LongNameGen {
         }
     }
 
-    pub fn process(&mut self, lfn: LongDirEntry) -> Result<()> {
+    fn process(&mut self, lfn: LongDirEntry) -> Result<()> {
         let is_last = lfn.is_last();
         let index = lfn.order() & 0x1f;
         if index == 0 {
@@ -521,14 +527,34 @@ impl LongNameGen {
         Ok(())
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.name.len()
     }
 
-    pub fn to_string(&self) -> String {
-        String::from_utf16_lossy(self.name.as_slice())
+    fn to_string(&self) -> String {
+        let mut s = String::from_utf16_lossy(self.name.as_slice());
+        s.retain(|c| (c != '\u{0}' && c != '\u{ffff}'));
+        s
+    }
+
+    fn validate_checksum(&self, short_entry: &ShortDirEntry) -> Result<()> {
+        if self.chksum != short_entry.compute_checksum() {
+            Err(Error::new(ErrorKind::Other, "Invalid Checksum"))
+        } else {
+            Ok(())
+        }
     }
 }
+
+/// Taken from rust-fatfs: https://github.com/rafalh/rust-fatfs
+fn split_path(path: &str) -> (&str, Option<&str>) {
+    let mut path_split = path.trim_matches('/').splitn(2, "/");
+    let comp = path_split.next().unwrap();
+    let rest_opt = path_split.next();
+    (comp, rest_opt)
+}
+
+
 /*
 impl fmt::Debug for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
