@@ -67,7 +67,8 @@ impl Dir {
         self.root_offset.is_some()
     }
 
-   // pub fn find_entry(&self, name: &str, )
+     //pub fn find_entry(&self, name: &str, )
+    // TODO: open, create_file, create_dir, find_entry
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -533,7 +534,8 @@ impl LongNameGen {
 
     fn to_string(&self) -> String {
         let mut s = String::from_utf16_lossy(self.name.as_slice());
-        s.retain(|c| (c != '\u{0}' && c != '\u{ffff}'));
+        let len = s.find('\u{0}').unwrap_or(s.len());
+        s.truncate(len);
         s
     }
 
@@ -554,7 +556,11 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     (comp, rest_opt)
 }
 
+struct ShortNameGen {
+    name: [u8; 11],
+    is_lossy: bool,
 
+}
 /*
 impl fmt::Debug for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
