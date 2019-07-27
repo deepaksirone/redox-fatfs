@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate log;
 
-//extern crate syscall;
+extern crate syscall;
 extern crate byteorder;
 #[macro_use]
 extern crate bitflags;
@@ -19,6 +19,7 @@ mod bpb;
 mod filesystem;
 mod dir_entry;
 mod table;
+mod mount;
 
 //pub use disk::*;
 pub use bpb::*;

@@ -67,6 +67,9 @@ impl Dir {
         self.root_offset.is_some()
     }
 
+    pub fn size<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>) -> u64 {
+        fs.num_clusters_chain(self.first_cluster) * fs.bytes_per_cluster()
+    }
      //pub fn find_entry(&self, name: &str, )
     // TODO: open, create_file, create_dir, find_entry
 }

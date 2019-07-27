@@ -259,6 +259,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.cluster_iter(start_cluster).collect()
     }
 
+    pub fn num_clusters_chain(&mut self, start_cluster: Cluster) -> u64 {
+        self.cluster_iter(start_cluster).fold(0, |sz, cluster| sz + 1)
+    }
+
     pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let partition_offset = self.partition_offset;
         self.disk.borrow_mut().seek(SeekFrom::Start(partition_offset + offset))?;
