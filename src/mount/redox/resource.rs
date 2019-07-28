@@ -7,7 +7,7 @@ use syscall::error::{Error, Result, EBADF, EBUSY, EINVAL, EISDIR, EPERM};
 use syscall::flag::{O_ACCMODE, O_RDONLY, O_WRONLY, O_RDWR, F_GETFL, F_SETFL, MODE_PERM, PROT_READ, PROT_WRITE, SEEK_SET, SEEK_CUR, SEEK_END};
 
 use filesystem::FileSystem;
-use dir_entry::Dir;
+use dir_entry::{Dir, File};
 
 use super::scheme::{Fmaps, FmapKey, FmapValue};
 
@@ -156,6 +156,34 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         Err(Error::new(EBADF))
     }
 
-
-
 }
+
+pub struct FileResource {
+    file: File,
+    flags: usize,
+    seek: u64,
+    uid: u32,
+    fmap: Option<(usize, FmapKey)>
+}
+/*
+impl<D: Read + Write + Seek> Resource<D> for FileResource {
+    fn start_cluster(&self) -> u64 {
+        self.file.first_cluster.cluster_number
+    }
+
+    fn dup(&self) -> Result<Box<Resource<D>>> {
+        Ok(Box::new(
+            FileResource {
+                file: self.file.clone(),
+                flags: self.flags,
+                seek: self.seek,
+                uid: self.uid,
+                fmap: None
+            }
+        ))
+    }
+
+    fn read(&mut self, buf: &mut [u8], fs: &mut FileSystem<D>) -> Result<usize> {
+
+    }
+}*/

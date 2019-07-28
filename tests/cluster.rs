@@ -35,13 +35,19 @@ fn print_fat32() {
     println!("Second Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 32).unwrap());
     println!("Third Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 64).unwrap());
     let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    let mut file_buf = [0; 3000];
     for entry in root_dir  {
 
         println!("Dir Entry : {:?}\n", entry);
         match entry {
             DirEntry::File(f) => {
                 let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
-                println!("Upper case filename: {:?}", tmp)
+                let len = f.read(&mut file_buf, &mut fs, 0).expect("Error Reading file");
+                println!("Upper case filename: {:?}", tmp);
+                for c in &file_buf[..len] {
+                    print!("{}", *c as char);
+                }
+                println!("Read len = {}", len);
             },
             DirEntry::Dir(d) => {
                 let mut tmp: String = d.dir_name.chars().flat_map(|c| c.to_uppercase()).collect();

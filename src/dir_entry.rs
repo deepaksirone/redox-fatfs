@@ -2,11 +2,12 @@ use std::io::{Read, Write, Seek, SeekFrom};
 use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
 use std::{num, fmt, str};
+use std::cmp::min;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Cluster;
 use filesystem::FileSystem;
-use table::{FatEntry, get_entry};
+use table::{FatEntry, get_entry, allocate_cluster};
 
 use super::Result;
 
@@ -63,6 +64,7 @@ impl Dir {
         }
     }
 
+    // Is root dir of fat12 and fat16
     pub fn is_root(&self) -> bool {
         self.root_offset.is_some()
     }
@@ -70,10 +72,122 @@ impl Dir {
     pub fn size<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>) -> u64 {
         fs.num_clusters_chain(self.first_cluster) * fs.bytes_per_cluster()
     }
+
+    //TODO: Fix this for FAT12 and FAT16 root dirs
+    pub fn find_free_entries<D: Read + Write + Seek>(&self, num_free: u64, fs: &mut FileSystem<D>) -> Result<Option<(Cluster, u64)>> {
+        let mut free = 0;
+        let mut current_cluster = self.first_cluster;
+        let mut offset = self.root_offset.unwrap_or(0);
+        let mut first_free= None;
+
+        loop {
+            if offset >= fs.bytes_per_cluster() && !self.is_root() {
+                match get_entry(fs, current_cluster).ok() {
+                    Some(FatEntry::Next(c)) => {
+                        current_cluster = c;
+                        offset = offset % fs.bytes_per_cluster();
+                    },
+                    _ => {
+                        break;
+                    }
+                }
+            }
+
+            if self.is_root() && offset > fs.root_dir_end_offset().unwrap() {
+                return Ok(None)
+            }
+
+            let e_offset = fs.cluster_offset(current_cluster) + offset;
+            let entry = get_dir_entry_raw(fs, e_offset)?;
+            match entry {
+                DirEntryRaw::Free | DirEntryRaw::FreeRest => {
+                    if free == 0 {
+                        first_free = Some((current_cluster, offset));
+                    }
+                    free += 1;
+                    if free == num_free {
+                        return Ok(first_free)
+                    }
+                },
+                _ => {
+                    free = 0;
+                }
+            }
+            offset += DIR_ENTRY_LEN;
+        }
+
+        let remaining = num_free - free;
+        let clusters_req = (remaining * DIR_ENTRY_LEN + fs.bytes_per_sec() - 1) / fs.bytes_per_sec();
+        let mut first_cluster= Cluster::default();
+        let mut prev_cluster = current_cluster;
+        for i in 0..clusters_req {
+            let c = allocate_cluster(fs, Some(prev_cluster))?;
+            if i == 0 {
+                first_cluster = c;
+            }
+            prev_cluster = c;
+        }
+
+        if free > 0 {
+            Ok(first_free)
+        } else {
+            Ok(Some((first_cluster, 0)))
+        }
+    }
      //pub fn find_entry(&self, name: &str, )
     // TODO: open, create_file, create_dir, find_entry
 }
 
+impl File {
+    pub fn size(&self) -> u64 {
+        self.short_dir_entry.file_size as u64
+    }
+
+    pub fn read<D: Read + Write + Seek>(&self, buf: &mut [u8], fs: &mut FileSystem<D>, mut offset: u64) -> Result<usize> {
+        if offset >= self.size() {
+            return Ok(0)
+        }
+
+        let start_cluster_number = (offset + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+        let mut current_cluster = match fs.get_cluster_relative(self.first_cluster, start_cluster_number as usize) {
+            Some(c) => c,
+            None => return Ok(0)
+        };
+
+        let bytes_remaining_file = self.size() - offset;
+        let read_size = min(buf.len(), bytes_remaining_file as usize);
+        let mut cluster_offset = offset % fs.bytes_per_cluster();
+
+        let mut start = 0;
+
+        let mut read = 0;
+
+        loop {
+            if cluster_offset >= fs.bytes_per_cluster() {
+                match get_entry(fs, current_cluster).ok() {
+                    Some(FatEntry::Next(c)) => {
+                        current_cluster = c;
+                        cluster_offset = cluster_offset % fs.bytes_per_cluster();
+                    },
+                    _ => {
+                        break;
+                    }
+                }
+            }
+            let end_len = min(min((fs.bytes_per_cluster() - cluster_offset) as usize, buf.len() - read), read_size - read);
+            let r = fs.read_at(fs.cluster_offset(current_cluster) + cluster_offset, &mut buf[start..start + end_len])?;
+            read += r;
+            start += r;
+            cluster_offset += r as u64;
+            if read == read_size {
+                break;
+            }
+
+        }
+        Ok(read)
+
+    }
+}
 #[derive(Debug, Default, Copy, Clone)]
 pub struct ShortDirEntry {
     /// Short name

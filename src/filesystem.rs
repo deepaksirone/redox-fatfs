@@ -266,19 +266,19 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let partition_offset = self.partition_offset;
         self.disk.borrow_mut().seek(SeekFrom::Start(partition_offset + offset))?;
-        self.disk.borrow_mut().read(buf)?;
-        Ok(0)
+        self.disk.borrow_mut().read(buf)
     }
 
     pub fn seek_to(&mut self, offset: u64) -> Result<usize> {
-        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
-        Ok(0)
+        match self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset)) {
+            Ok(s) => Ok(s as usize),
+            Err(e) => Err(e)
+        }
     }
 
     pub fn write_to(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
-        self.disk.borrow_mut().write(buf)?;
-        Ok(0)
+        self.disk.borrow_mut().write(buf)
     }
 
     pub fn seek_to_cluster(&mut self, cluster: Cluster) -> Result<usize> {
@@ -414,6 +414,10 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             current_cluster: Some(start_cluster),
             fs: self
         }
+    }
+
+    pub fn get_cluster_relative(&mut self, start_cluster: Cluster, n: usize) -> Option<Cluster> {
+        self.cluster_iter(start_cluster).skip(n).next()
     }
 
     pub fn clean_shut_bit(&mut self) -> Result<bool> {
