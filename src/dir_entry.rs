@@ -3,6 +3,7 @@ use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
 use std::{num, fmt, str};
 use std::cmp::min;
+
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Cluster;
@@ -13,6 +14,8 @@ use super::Result;
 
 pub const DIR_ENTRY_LEN: u64 = 32;
 pub const LFN_PART_LEN: usize = 13;
+// Max 32-bit unsigned value
+pub const MAX_FILE_SIZE: u64 = 0xffffffff;
 
 bitflags! {
     #[derive(Default)]
@@ -73,12 +76,12 @@ impl Dir {
         fs.num_clusters_chain(self.first_cluster) * fs.bytes_per_cluster()
     }
 
-    //TODO: Fix this for FAT12 and FAT16 root dirs
+
     pub fn find_free_entries<D: Read + Write + Seek>(&self, num_free: u64, fs: &mut FileSystem<D>) -> Result<Option<(Cluster, u64)>> {
         let mut free = 0;
         let mut current_cluster = self.first_cluster;
         let mut offset = self.root_offset.unwrap_or(0);
-        let mut first_free= None;
+        let mut first_free = None;
 
         loop {
             if offset >= fs.bytes_per_cluster() && !self.is_root() {
@@ -116,9 +119,11 @@ impl Dir {
             offset += DIR_ENTRY_LEN;
         }
 
+        // FIXME
+
         let remaining = num_free - free;
-        let clusters_req = (remaining * DIR_ENTRY_LEN + fs.bytes_per_sec() - 1) / fs.bytes_per_sec();
-        let mut first_cluster= Cluster::default();
+        let clusters_req = (remaining * DIR_ENTRY_LEN + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+        let mut first_cluster = Cluster::default();
         let mut prev_cluster = current_cluster;
         for i in 0..clusters_req {
             let c = allocate_cluster(fs, Some(prev_cluster))?;
@@ -130,9 +135,11 @@ impl Dir {
 
         if free > 0 {
             Ok(first_free)
-        } else {
+        }
+        else {
             Ok(Some((first_cluster, 0)))
         }
+
     }
      //pub fn find_entry(&self, name: &str, )
     // TODO: open, create_file, create_dir, find_entry
@@ -141,6 +148,10 @@ impl Dir {
 impl File {
     pub fn size(&self) -> u64 {
         self.short_dir_entry.file_size as u64
+    }
+
+    pub fn set_size(&mut self, sz: u32) {
+        self.short_dir_entry.file_size = sz;
     }
 
     pub fn read<D: Read + Write + Seek>(&self, buf: &mut [u8], fs: &mut FileSystem<D>, mut offset: u64) -> Result<usize> {
@@ -159,7 +170,6 @@ impl File {
         let mut cluster_offset = offset % fs.bytes_per_cluster();
 
         let mut start = 0;
-
         let mut read = 0;
 
         loop {
@@ -187,7 +197,81 @@ impl File {
         Ok(read)
 
     }
+
+    pub fn write<D: Read + Write + Seek>(&mut self, buf: &[u8], fs: &mut FileSystem<D>, mut offset: u64) -> Result<usize> {
+        self.ensure_len(offset, buf.len() as u64, fs)?;
+
+        let start_cluster_number = (offset + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+        let mut current_cluster = match fs.get_cluster_relative(self.first_cluster, start_cluster_number as usize) {
+            Some(c) => c,
+            None => return Ok(0)
+        };
+        println!("Over here!");
+
+        let mut cluster_offset = offset % fs.bytes_per_cluster();
+
+        let mut start = 0;
+        let mut written = 0;
+
+        loop {
+            if cluster_offset >= fs.bytes_per_cluster() {
+                match get_entry(fs, current_cluster).ok() {
+                    Some(FatEntry::Next(c)) => {
+                        current_cluster = c;
+                        cluster_offset = cluster_offset % fs.bytes_per_cluster();
+                    },
+                    _ => {
+                        break;
+                    }
+                }
+            }
+
+            let end_len = min((fs.bytes_per_cluster() - cluster_offset) as usize, buf.len() - written);
+            println!("Cluster = {:?}, Cluster Offset = {:?}, Cluster Size = {:?}, start = {:?}, end = {:?}",
+                     current_cluster, cluster_offset, fs.bytes_per_cluster(), start, start + end_len);
+            let w = fs.write_to(fs.cluster_offset(current_cluster) + cluster_offset, &buf[start..start + end_len])?;
+
+            written += w;
+            start += w;
+            cluster_offset += w as u64;
+            if written == buf.len() {
+                break;
+            }
+        }
+
+        Ok(written)
+
+    }
+
+    fn ensure_len<D: Read + Write + Seek>(&mut self, offset: u64, len: u64, fs: &mut FileSystem<D>) -> Result<()> {
+        if offset + len <= self.size() {
+            return Ok(())
+        }
+
+        let cluster_offset = offset % fs.bytes_per_cluster();
+        let bytes_remaining_cluster = fs.bytes_per_cluster() - cluster_offset;
+        let extra_bytes = min((offset + len) - self.size(), MAX_FILE_SIZE - self.size());
+        if bytes_remaining_cluster < extra_bytes {
+            let clusters_req = (extra_bytes - bytes_remaining_cluster + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+            let mut current_cluster = match fs.get_last_cluster(self.first_cluster) {
+                Some(c) => c,
+                None => return Err(Error::new(ErrorKind::InvalidData, "Last Cluster not found"))
+            };
+
+            for i in 0..clusters_req {
+                current_cluster = allocate_cluster(fs, Some(current_cluster))?;
+            }
+        }
+        let new_size = self.size() + extra_bytes;
+        self.set_size(new_size as u32);
+        let short_entry_offset = fs.cluster_offset((self.loc.1).0) + (self.loc.1).1;
+        self.short_dir_entry.flush(short_entry_offset, fs)?;
+
+        Ok(())
+
+    }
 }
+
 #[derive(Debug, Default, Copy, Clone)]
 pub struct ShortDirEntry {
     /// Short name
@@ -267,7 +351,7 @@ impl ShortDirEntry {
         self.file_attrs.contains(FileAttributes::DIRECTORY)
     }
 
-    /// Taken from rust-fatfs: https://github.com/rafalh/rust-fatfs
+    /// Taken from rust-fatfs: https://github.com/debugrafalh/rust-fatfs
     fn name_to_string(&self) -> String {
         let sname_len = self.dir_name[..8].iter().rposition(|x| *x != Self::PADDING)
             .map(|l| l + 1).unwrap_or(0);
@@ -360,6 +444,24 @@ impl ShortDirEntry {
             sum = (sum << 7) + (sum >> 1) + num::Wrapping(*b);
         }
         sum.0
+    }
+
+    pub fn flush<D: Read + Write + Seek>(&self, offset: u64, fs: &mut FileSystem<D>) -> Result<()> {
+        fs.seek_to(offset)?;
+        fs.disk.borrow_mut().write(&self.dir_name)?;
+        fs.disk.borrow_mut().write_u8(self.file_attrs.bits)?;
+        fs.disk.borrow_mut().write_u8(self.nt_res)?;
+        fs.disk.borrow_mut().write_u8(self.crt_time_tenth)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.crt_time)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.crt_date)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.lst_acc_date)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.fst_clst_hi)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.wrt_time)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.wrt_date)?;
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.fst_clus_lo)?;
+        fs.disk.borrow_mut().write_u32::<LittleEndian>(self.file_size)?;
+        fs.disk.borrow_mut().flush()?;
+        Ok(())
     }
 
 }

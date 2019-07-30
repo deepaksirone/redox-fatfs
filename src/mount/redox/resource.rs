@@ -14,7 +14,7 @@ use super::scheme::{Fmaps, FmapKey, FmapValue};
 
 pub trait Resource<D: Read + Write + Seek> {
     fn start_cluster(&self) -> u64;
-    fn dup(&self) -> Result<Box<Resource<D>>>;
+    fn dup(&self) -> Result<Box<dyn Resource<D>>>;
     fn read(&mut self, buf: &mut [u8], fs: &mut FileSystem<D>) -> Result<usize>;
     fn write(&mut self, buf: &[u8], fs: &mut FileSystem<D>) -> Result<usize>;
     fn seek(&mut self, offset: usize, whence: usize, fs: &mut FileSystem<D>) -> Result<usize>;
@@ -53,7 +53,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         self.dir.first_cluster.cluster_number
     }
 
-    fn dup(&self) -> Result<Box<Resource<D>>> {
+    fn dup(&self) -> Result<Box<dyn Resource<D>>> {
         Ok(Box::new(
            DirResource {
                dir: self.dir.clone(),

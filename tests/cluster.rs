@@ -1,6 +1,6 @@
 extern crate redox_fatfs;
 
-use std::fs;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::str;
@@ -9,7 +9,7 @@ use redox_fatfs::*;
 
 #[test]
 fn print_fat32() {
-    let mut f = fs::File::open("images/fat32.img").unwrap();
+    let mut f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let root_clus = Cluster::new(2);
     let max_cluster = fs.max_cluster_number();
@@ -34,13 +34,13 @@ fn print_fat32() {
     println!("First Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start).unwrap());
     println!("Second Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 32).unwrap());
     println!("Third Root Dir Entry: {:?} ", get_dir_entry_raw(&mut fs, dir_start + 64).unwrap());
-    let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    let mut root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
     let mut file_buf = [0; 3000];
-    for entry in root_dir  {
+    for entry in root_dir.iter_mut()  {
 
         println!("Dir Entry : {:?}\n", entry);
         match entry {
-            DirEntry::File(f) => {
+            DirEntry::File(ref mut f) => {
                 let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
                 let len = f.read(&mut file_buf, &mut fs, 0).expect("Error Reading file");
                 println!("Upper case filename: {:?}", tmp);
@@ -48,6 +48,18 @@ fn print_fat32() {
                     print!("{}", *c as char);
                 }
                 println!("Read len = {}", len);
+                let w = f.write(&[0x45,
+                0x78,
+                0x74,
+                0x72,
+                0x61,
+                0x20,
+                0x74,
+                0x65,
+                0x78,
+                0x74
+                ], &mut fs, f.size()).expect("Write failed");
+                println!("Written bytes = {:?}", w);
             },
             DirEntry::Dir(d) => {
                 let mut tmp: String = d.dir_name.chars().flat_map(|c| c.to_uppercase()).collect();
@@ -66,7 +78,7 @@ fn print_fat32() {
 
 
 fn print_fat12() {
-    let mut f = fs::File::open("images/fat12.img").unwrap();
+    let mut f = OpenOptions::new().read(true).write(true).open("images/fat12.img").expect("Failed to open fat12.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let root_sec = fs.bpb.rsvd_sec_cnt as u64 + (fs.bpb.num_fats as u64 * fs.bpb.fat_size_16 as u64);
     let root_clus = Cluster::new(root_sec / fs.bpb.sectors_per_cluster as u64);
@@ -98,7 +110,7 @@ fn print_fat12() {
 
 
 fn print_fat16() {
-    let mut f = fs::File::open("images/fat16.img").unwrap();
+    let mut f = OpenOptions::new().read(true).write(true).open("images/fat16.img").expect("Failed to open fat16.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let max_cluster = fs.max_cluster_number();
     let root_sec = fs.bpb.rsvd_sec_cnt as u64 + (fs.bpb.num_fats as u64 * fs.bpb.fat_size_16 as u64);

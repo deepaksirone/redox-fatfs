@@ -276,9 +276,12 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         }
     }
 
-    pub fn write_to(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+    pub fn write_to(&mut self, offset: u64, buf: &[u8]) -> Result<usize> {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
-        self.disk.borrow_mut().write(buf)
+        let written = self.disk.borrow_mut().write(buf)?;
+        self.disk.borrow_mut().flush()?;
+        //println!("Write Success");
+        Ok(written)
     }
 
     pub fn seek_to_cluster(&mut self, cluster: Cluster) -> Result<usize> {
@@ -286,6 +289,12 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
         self.disk.borrow_mut().seek(SeekFrom::Start(first_sec_cluster * bytes_per_sec))?;
         Ok(0)
+    }
+
+    pub fn zero_cluster(&mut self, cluster: Cluster) -> Result<()> {
+        let zeroes = vec![0; self.bytes_per_cluster() as usize];
+        self.write_to(self.cluster_offset(cluster), zeroes.as_slice())?;
+        Ok(())
     }
 
     pub fn fat_size(&self) -> u64 {
@@ -417,7 +426,15 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn get_cluster_relative(&mut self, start_cluster: Cluster, n: usize) -> Option<Cluster> {
-        self.cluster_iter(start_cluster).skip(n).next()
+        if (n > 0) {
+            self.cluster_iter(start_cluster).skip(n - 1).next()
+        } else {
+            self.cluster_iter(start_cluster).next()
+        }
+    }
+
+    pub fn get_last_cluster(&mut self, start_cluster: Cluster) -> Option<Cluster> {
+        self.cluster_iter(start_cluster).last()
     }
 
     pub fn clean_shut_bit(&mut self) -> Result<bool> {
