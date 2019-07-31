@@ -426,11 +426,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn get_cluster_relative(&mut self, start_cluster: Cluster, n: usize) -> Option<Cluster> {
-        if (n > 0) {
-            self.cluster_iter(start_cluster).skip(n - 1).next()
-        } else {
-            self.cluster_iter(start_cluster).next()
-        }
+            self.cluster_iter(start_cluster).skip(n).next()
     }
 
     pub fn get_last_cluster(&mut self, start_cluster: Cluster) -> Option<Cluster> {

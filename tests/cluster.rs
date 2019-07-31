@@ -58,7 +58,7 @@ fn print_fat32() {
                 0x65,
                 0x78,
                 0x74
-                ], &mut fs, f.size()).expect("Write failed");
+                ], &mut fs, f.size() + 25).expect("Write failed");
                 println!("Written bytes = {:?}", w);
             },
             DirEntry::Dir(d) => {

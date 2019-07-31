@@ -159,7 +159,7 @@ impl File {
             return Ok(0)
         }
 
-        let start_cluster_number = (offset + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+        let start_cluster_number = offset / fs.bytes_per_cluster();
         let mut current_cluster = match fs.get_cluster_relative(self.first_cluster, start_cluster_number as usize) {
             Some(c) => c,
             None => return Ok(0)
@@ -201,7 +201,8 @@ impl File {
     pub fn write<D: Read + Write + Seek>(&mut self, buf: &[u8], fs: &mut FileSystem<D>, mut offset: u64) -> Result<usize> {
         self.ensure_len(offset, buf.len() as u64, fs)?;
 
-        let start_cluster_number = (offset + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
+        //FIXME
+        let start_cluster_number = offset / fs.bytes_per_cluster();
         let mut current_cluster = match fs.get_cluster_relative(self.first_cluster, start_cluster_number as usize) {
             Some(c) => c,
             None => return Ok(0)
@@ -244,25 +245,55 @@ impl File {
     }
 
     fn ensure_len<D: Read + Write + Seek>(&mut self, offset: u64, len: u64, fs: &mut FileSystem<D>) -> Result<()> {
+        if self.size() == 0 {
+            self.first_cluster = allocate_cluster(fs, None)?;
+            self.short_dir_entry.set_first_cluster(self.first_cluster);
+        }
+
         if offset + len <= self.size() {
             return Ok(())
         }
 
-        let cluster_offset = offset % fs.bytes_per_cluster();
+        //Compute space available in last cluster
+        let cluster_offset = self.size() % fs.bytes_per_cluster();
         let bytes_remaining_cluster = fs.bytes_per_cluster() - cluster_offset;
+
+        //Compute bytes to be allocated
         let extra_bytes = min((offset + len) - self.size(), MAX_FILE_SIZE - self.size());
+
         if bytes_remaining_cluster < extra_bytes {
             let clusters_req = (extra_bytes - bytes_remaining_cluster + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
-            let mut current_cluster = match fs.get_last_cluster(self.first_cluster) {
+            let last_cluster = match fs.get_last_cluster(self.first_cluster) {
                 Some(c) => c,
                 None => return Err(Error::new(ErrorKind::InvalidData, "Last Cluster not found"))
             };
 
+            let mut current_cluster = last_cluster;
             for i in 0..clusters_req {
+                println!("[info] Allocating Cluster for length req");
                 current_cluster = allocate_cluster(fs, Some(current_cluster))?;
             }
+
+            let cluster_start = self.size() / fs.bytes_per_cluster();
+            let s_cluster = fs.get_cluster_relative(self.first_cluster, cluster_start as usize).unwrap();
+            let start_offset = fs.cluster_offset(s_cluster) + self.size() % fs.bytes_per_cluster();
+            let b_remaining = fs.bytes_per_cluster() - (self.size() % fs.bytes_per_cluster());
+            self.zero_range(fs, start_offset, start_offset + b_remaining - 1)?;
+
         }
+        else {
+            let cluster_start = self.size() / fs.bytes_per_cluster();
+            println!("[INFO] The clusters: {:?}", fs.clusters(self.first_cluster));
+            let s_cluster = fs.get_cluster_relative(self.first_cluster, cluster_start as usize).unwrap();
+
+            let start_offset = fs.cluster_offset(s_cluster) + self.size() % fs.bytes_per_cluster();
+            if offset > self.size() {
+                self.zero_range(fs, start_offset, start_offset + offset - self.size() - 1);
+            }
+        }
+
         let new_size = self.size() + extra_bytes;
+        // TODO: Add mod time and other stuff
         self.set_size(new_size as u32);
         let short_entry_offset = fs.cluster_offset((self.loc.1).0) + (self.loc.1).1;
         self.short_dir_entry.flush(short_entry_offset, fs)?;
@@ -270,6 +301,21 @@ impl File {
         Ok(())
 
     }
+
+    // Range start and range end are absolute disk offsets
+    // Range start and range end must be in the same cluster
+    fn zero_range<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>, range_start: u64, range_end: u64) -> Result<()> {
+        if range_end < range_start {
+            return Ok(())
+        }
+
+        println!("Zeroing Range: {} - {}", range_start, range_end);
+        let zeroes = vec![0; (range_end - range_start + 1) as usize];
+        fs.write_to(range_start, zeroes.as_slice())?;
+        Ok(())
+    }
+
+
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -462,6 +508,11 @@ impl ShortDirEntry {
         fs.disk.borrow_mut().write_u32::<LittleEndian>(self.file_size)?;
         fs.disk.borrow_mut().flush()?;
         Ok(())
+    }
+
+    pub fn set_first_cluster(&mut self, cluster: Cluster) {
+        self.fst_clus_lo = (cluster.cluster_number & 0x0000ffff) as u16;
+        self.fst_clst_hi = ((cluster.cluster_number & 0xffff0000) >> 16) as u16;
     }
 
 }
