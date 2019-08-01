@@ -207,7 +207,7 @@ impl File {
             Some(c) => c,
             None => return Ok(0)
         };
-        println!("Over here!");
+        //println!("Over here!");
 
         let mut cluster_offset = offset % fs.bytes_per_cluster();
 
@@ -261,6 +261,7 @@ impl File {
         //Compute bytes to be allocated
         let extra_bytes = min((offset + len) - self.size(), MAX_FILE_SIZE - self.size());
 
+        // Allocate extra clusters as required
         if bytes_remaining_cluster < extra_bytes {
             let clusters_req = (extra_bytes - bytes_remaining_cluster + fs.bytes_per_cluster() - 1) / fs.bytes_per_cluster();
             let last_cluster = match fs.get_last_cluster(self.first_cluster) {
@@ -273,24 +274,22 @@ impl File {
                 println!("[info] Allocating Cluster for length req");
                 current_cluster = allocate_cluster(fs, Some(current_cluster))?;
             }
+        }
 
+        if offset > self.size() {
             let cluster_start = self.size() / fs.bytes_per_cluster();
             let s_cluster = fs.get_cluster_relative(self.first_cluster, cluster_start as usize).unwrap();
             let start_offset = fs.cluster_offset(s_cluster) + self.size() % fs.bytes_per_cluster();
             let b_remaining = fs.bytes_per_cluster() - (self.size() % fs.bytes_per_cluster());
-            self.zero_range(fs, start_offset, start_offset + b_remaining - 1)?;
-
-        }
-        else {
-            let cluster_start = self.size() / fs.bytes_per_cluster();
-            println!("[INFO] The clusters: {:?}", fs.clusters(self.first_cluster));
-            let s_cluster = fs.get_cluster_relative(self.first_cluster, cluster_start as usize).unwrap();
-
-            let start_offset = fs.cluster_offset(s_cluster) + self.size() % fs.bytes_per_cluster();
-            if offset > self.size() {
-                self.zero_range(fs, start_offset, start_offset + offset - self.size() - 1);
+            let offset_start = offset / fs.bytes_per_cluster();
+            let offset_cluster = fs.get_cluster_relative(self.first_cluster, offset_start as usize).unwrap();
+            if s_cluster != offset_cluster {
+                self.zero_range(fs, start_offset, start_offset + b_remaining - 1)?;
+            } else {
+                self.zero_range(fs, start_offset, start_offset + offset - self.size() - 1)?;
             }
         }
+
 
         let new_size = self.size() + extra_bytes;
         // TODO: Add mod time and other stuff
@@ -316,6 +315,14 @@ impl File {
     }
 
 
+    /*
+    pub fn truncate<D: Read + Write + Seek>(&mut self, fs: &mut FileSystem<D>, new_size: u64) -> Result<()> {
+        if new_size >= self.size() {
+            return Ok(())
+        }
+
+
+    }*/
 }
 
 #[derive(Debug, Default, Copy, Clone)]
