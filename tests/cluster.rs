@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-#[test]
+
 fn print_fat32() {
     let mut f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -76,7 +76,7 @@ fn print_fat32() {
 
 }
 
-
+#[test]
 fn print_fat12() {
     let mut f = OpenOptions::new().read(true).write(true).open("images/fat12.img").expect("Failed to open fat12.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -101,9 +101,40 @@ fn print_fat12() {
     let max_cluster = fs.max_cluster_number();
     println!("Num free Cluster = {:?}", get_free_count(&mut fs, max_cluster));
     println!("Cluster Chain of longFile.txt = {:?}", fs.clusters(Cluster::new(3)));
-    let root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
-    for entry in root_dir  {
+    let mut root_dir : Vec<DirEntry> = fs.root_dir().to_iter(&mut fs).collect();
+    let mut file_buf = [0; 3000];
+    for entry in root_dir.iter_mut()  {
+
         println!("Dir Entry : {:?}\n", entry);
+        match entry {
+            DirEntry::File(ref mut f) => {
+                let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
+                let len = f.read(&mut file_buf, &mut fs, 0).expect("Error Reading file");
+                println!("Upper case filename: {:?}", tmp);
+                for c in &file_buf[..len] {
+                    print!("{}", *c as char);
+                }
+                println!("Read len = {}", len);
+                let w = f.write(&[0x45,
+                    0x78,
+                    0x74,
+                    0x72,
+                    0x61,
+                    0x20,
+                    0x74,
+                    0x65,
+                    0x78,
+                    0x74
+                ], &mut fs, f.size() + 25).expect("Write failed");
+                println!("Written bytes = {:?}", w);
+            },
+            DirEntry::Dir(d) => {
+                let mut tmp: String = d.dir_name.chars().flat_map(|c| c.to_uppercase()).collect();
+                tmp.retain(|c| (c != '\u{0}') && (c != '\u{FFFF}'));
+                let m = tmp.chars().eq(d.dir_name.chars().flat_map(|c| c.to_uppercase()));
+                println!("Upper case dirname: {:?}, match = {}", tmp, m)
+            }
+        }
     }
 
 }

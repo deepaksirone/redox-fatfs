@@ -8,7 +8,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Cluster;
 use filesystem::FileSystem;
-use table::{FatEntry, get_entry, allocate_cluster};
+use table::{FatEntry, get_entry, allocate_cluster, deallocate_cluster_chain};
 
 use super::Result;
 
@@ -245,13 +245,13 @@ impl File {
     }
 
     fn ensure_len<D: Read + Write + Seek>(&mut self, offset: u64, len: u64, fs: &mut FileSystem<D>) -> Result<()> {
+        if offset + len <= self.size() {
+            return Ok(())
+        }
+
         if self.size() == 0 {
             self.first_cluster = allocate_cluster(fs, None)?;
             self.short_dir_entry.set_first_cluster(self.first_cluster);
-        }
-
-        if offset + len <= self.size() {
-            return Ok(())
         }
 
         //Compute space available in last cluster
@@ -276,6 +276,7 @@ impl File {
             }
         }
 
+        //TODO: Optimize
         if offset > self.size() {
             let cluster_start = self.size() / fs.bytes_per_cluster();
             let s_cluster = fs.get_cluster_relative(self.first_cluster, cluster_start as usize).unwrap();
@@ -315,14 +316,26 @@ impl File {
     }
 
 
-    /*
+
     pub fn truncate<D: Read + Write + Seek>(&mut self, fs: &mut FileSystem<D>, new_size: u64) -> Result<()> {
         if new_size >= self.size() {
             return Ok(())
         }
 
+        let new_last_cluster = new_size / fs.bytes_per_cluster();
+        match fs.get_cluster_relative(self.first_cluster, (new_last_cluster + 1) as usize) {
+            Some(c) => {
+                deallocate_cluster_chain(fs, c)?;
+            },
+            None => { }
+        }
 
-    }*/
+        self.set_size(new_size as u32);
+        let short_entry_offset = fs.cluster_offset((self.loc.1).0) + (self.loc.1).1;
+        self.short_dir_entry.flush(short_entry_offset, fs)?;
+        Ok(())
+
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -838,6 +851,12 @@ struct ShortNameGen {
     is_lossy: bool,
 
 }
+
+impl ShortNameGen {
+
+}
+
+
 /*
 impl fmt::Debug for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
