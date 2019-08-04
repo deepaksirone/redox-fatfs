@@ -406,7 +406,8 @@ pub fn allocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, prev_clu
     if let Some(prev_clus) = prev_cluster {
         set_entry(fs, prev_clus, FatEntry::Next(free_cluster))?;
     }
-    fs.zero_cluster(free_cluster)?;
+        #[cfg(feature = "secure")]
+        fs.zero_cluster(free_cluster)?;
     Ok(free_cluster)
 }
 
@@ -415,6 +416,8 @@ pub fn deallocate_cluster<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluste
     if entry != FatEntry::Bad {
         set_entry(fs, cluster, FatEntry::Unused)?;
         fs.fs_info.borrow_mut().delta_free_count(1);
+            #[cfg(feature = "secure")]
+            fs.zero_cluster(cluster);
         Ok(())
     }
     else {

@@ -780,6 +780,27 @@ pub enum DirEntry {
     Dir(Dir)
 }
 
+impl DirEntry {
+    pub fn short_name(&self) -> String {
+        match &self {
+            &DirEntry::File(f) => {
+                let s = str::from_utf8(&f.short_dir_entry.dir_name);
+                String::from(s.unwrap_or("Invalid".as_ref()))
+            },
+            &DirEntry::Dir(d) => {
+                match d.short_dir_entry {
+                    Some(ref e) => {
+                        let s = str::from_utf8(&e.dir_name);
+                        String::from(s.unwrap_or("Invalid".as_ref()))
+                    },
+                    None => String::from("Root Dir")
+                }
+
+            }
+        }
+    }
+}
+
 struct LongNameGen {
     name: Vec<u16>,
     chksum: u8,
@@ -846,16 +867,98 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     (comp, rest_opt)
 }
 
+/// Following the Win NT convention from Wikipedia
+/// https://en.wikipedia.org/wiki/8.3_filename
+#[derive(Debug, Default, Clone)]
 struct ShortNameGen {
     name: [u8; 11],
     is_lossy: bool,
-
+    basename_len: u8,
+    checksum_bitmask: u16,
+    suffix_bitmask: u16,
+    name_fits: bool,
+    exact_match: bool,
+    is_dot: bool,
+    is_dotdot: bool
 }
 
 impl ShortNameGen {
 
-}
+    const FNAME_LEN: usize = 8;
+    pub fn new(mut name: &str) -> Self {
+        name = name.trim();
+        let mut short_name = [0x20u8; 11];
+        if name == "." {
+            short_name[0] = '.' as u8;
+        }
+        if name == ".." {
+            short_name[0] = '.' as u8;
+            short_name[1] = '.' as u8;
+        }
 
+        let (name_fits, basename_len, is_lossy) = match name.rfind('.') {
+            Some(idx) => {
+                let (b_len, fits, b_lossy) = Self::copy_part(&mut short_name[..Self::FNAME_LEN], &name[..idx]);
+                let (ext_len, ext_fits, ext_lossy) = Self::copy_part(&mut short_name[Self::FNAME_LEN..Self::FNAME_LEN + 3], &name[idx + 1..]);
+                (fits && ext_fits, b_len, b_lossy || ext_lossy)
+            },
+            None => {
+                let (b_len, fits, b_lossy) = Self::copy_part(&mut short_name[..Self::FNAME_LEN], &name);
+                (fits, b_len, b_lossy)
+            }
+        };
+        let checksum = Self::checksum(name);
+        ShortNameGen {
+            name: short_name,
+            is_lossy: is_lossy,
+            is_dot: name == ".",
+            is_dotdot: name == "..",
+            basename_len: basename_len,
+            name_fits: name_fits,
+            ..Default::default()
+        }
+
+
+    }
+
+    fn copy_part(dest: &mut [u8], src: &str) -> (u8, bool, bool) {
+        let mut dest_len: usize = 0;
+        let mut lossy_conv = false;
+        for c in src.chars() {
+            if dest_len == dest.len() {
+                return (dest_len as u8, false, lossy_conv)
+            }
+
+            if c == ' ' || c == '.' {
+                lossy_conv = true;
+                continue;
+            }
+
+            let cp = match c {
+                'a'...'z' | 'A'...'Z' | '0'...'9' => c,
+                '$' |'%' | '\''| '-' | '_' | '@' | '~' | '`' | '!' | '(' | ')' | '{' | '}' | '^'
+                | '#' | '&' => c,
+                _ => '_'
+            };
+            lossy_conv = lossy_conv || c != cp;
+            let upper =  c.to_ascii_uppercase();
+            dest[dest_len] = upper as u8;
+        }
+        (dest_len as u8, true, lossy_conv)
+    }
+
+    // Fletcher-16 Checksum
+    fn checksum(name: &str) -> u16 {
+        let mut sum1: u16 = 0;
+        let mut sum2: u16 = 0;
+        for c in name.chars() {
+            sum1 = (sum1 + (c as u16)) % 0xff;
+            sum2 = (sum2 + sum1) % 0xff;
+        }
+        (sum2 << 8) | sum1
+    }
+
+}
 
 /*
 impl fmt::Debug for DirEntry {

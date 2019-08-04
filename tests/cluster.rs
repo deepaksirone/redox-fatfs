@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-
+#[test]
 fn print_fat32() {
     let mut f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -39,6 +39,7 @@ fn print_fat32() {
     for entry in root_dir.iter_mut()  {
 
         println!("Dir Entry : {:?}\n", entry);
+        println!("Short Name: {:?}\n", entry.short_name());
         match entry {
             DirEntry::File(ref mut f) => {
                 let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
@@ -76,7 +77,6 @@ fn print_fat32() {
 
 }
 
-#[test]
 fn print_fat12() {
     let mut f = OpenOptions::new().read(true).write(true).open("images/fat12.img").expect("Failed to open fat12.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -106,6 +106,7 @@ fn print_fat12() {
     for entry in root_dir.iter_mut()  {
 
         println!("Dir Entry : {:?}\n", entry);
+        println!("Short Name: {:?}\n", entry.short_name());
         match entry {
             DirEntry::File(ref mut f) => {
                 let tmp: Vec<char> = f.fname.chars().flat_map(|c| c.to_uppercase()).collect();
@@ -168,5 +169,18 @@ fn print_fat16() {
     for entry in root_dir  {
         println!("Dir Entry : {:?}\n", entry);
     }
+}
+
+
+fn short_names()
+{
+    let s = ".";
+    let s1 = "....hello...txt";
+
+    let e = s.rfind('.').unwrap();
+    println!(". r find: {:?}", e);
+    println!("Printing slice: {:?}", &s.as_bytes()[..e]);
+    println!("IStrue : {:?}", s == ".");
+    println!("Period Stripped: {:?}", s1.trim_start_matches("."));
 }
 
