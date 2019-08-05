@@ -67,13 +67,18 @@ fn print_fat32() {
                 tmp.retain(|c| (c != '\u{0}') && (c != '\u{FFFF}'));
                 let m = tmp.chars().eq(d.dir_name.chars().flat_map(|c| c.to_uppercase()));
                 println!("Upper case dirname: {:?}, match = {}", tmp, m)
+            },
+            DirEntry::VolID(s) => {
+                println!("[VOL-ID] The volume ID: {:?}", s);
             }
         }
     }
     let s = "//this/is/a/path.txt".to_string();
     let t : Vec<&str> = s.split('/').collect();
     println!("Split string : {:?}", t);
-
+    let root_d = fs.root_dir();
+    let r = root_d.find_entry("heLlo.txt", None, None, &mut fs);
+    println!("Trying to find heLlo.txt : {:?}", r);
 
 }
 
@@ -134,6 +139,9 @@ fn print_fat12() {
                 tmp.retain(|c| (c != '\u{0}') && (c != '\u{FFFF}'));
                 let m = tmp.chars().eq(d.dir_name.chars().flat_map(|c| c.to_uppercase()));
                 println!("Upper case dirname: {:?}, match = {}", tmp, m)
+            },
+            DirEntry::VolID(s) => {
+                println!("[VOL-ID] The volume ID: {:?}", s);
             }
         }
     }

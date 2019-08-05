@@ -3,6 +3,7 @@ use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
 use std::{num, fmt, str};
 use std::cmp::min;
+use std::char;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -50,10 +51,6 @@ pub struct Dir {
     pub dir_name: String,
     pub short_dir_entry: Option<ShortDirEntry>,
     pub loc: Option<((Cluster, u64), (Cluster, u64))>
-}
-
-pub struct DirRange {
-
 }
 
 impl Dir {
@@ -143,6 +140,24 @@ impl Dir {
     }
      //pub fn find_entry(&self, name: &str, )
     // TODO: open, create_file, create_dir, find_entry
+    pub fn find_entry<D: Read + Write + Seek>(&self, name: &str,
+                      expected_dir: Option<bool>,
+                      mut short_name_gen: Option<&mut ShortNameGen>, fs: &mut FileSystem<D>) -> Result<DirEntry> {
+         for e in self.to_iter(fs) {
+             if e.eq_name(name) {
+                 if expected_dir.is_some() && Some(e.is_dir()) != expected_dir {
+                     let msg = if e.is_dir() { "Is a directory" } else { "Is a file" };
+                     return Err(Error::new(ErrorKind::Other, msg));
+                 }
+                 return Ok(e);
+             }
+
+             if let Some(ref mut sng) = short_name_gen {
+                 sng.add_name(&e.short_name_raw())
+             }
+         }
+         Err(Error::new(ErrorKind::NotFound, "No such file or directory"))
+     }
 }
 
 impl File {
@@ -395,10 +410,17 @@ impl LongDirEntry {
     }
 
     pub fn copy_name_to_slice(&self, name_part: &mut [u16]) {
-        debug_assert!(name_part.len() == LFN_PART_LEN);
+        assert_eq!(name_part.len(), LFN_PART_LEN);
         name_part[0..5].copy_from_slice(&self.name1);
         name_part[5..11].copy_from_slice(&self.name2);
         name_part[11..13].copy_from_slice(&self.name3);
+    }
+
+    fn insert_name(&mut self, name_part: &[u16]) {
+        assert_eq!(name_part.len(), LFN_PART_LEN);
+        self.name1.copy_from_slice(&name_part[0..5]);
+        self.name2.copy_from_slice(&name_part[5..11]);
+        self.name3.copy_from_slice(&name_part[11..13]);
     }
 
     pub fn order(&self) -> u8 {
@@ -408,16 +430,39 @@ impl LongDirEntry {
     pub fn chksum(&self) -> u8 {
         self.chksum
     }
+
+    fn new(ord: u8, name_part: &[u16], checksum: u8) -> Self {
+        let mut lentry = LongDirEntry::default();
+        lentry.ord = ord;
+        lentry.insert_name(name_part);
+        lentry.file_attrs = FileAttributes::LFN;
+        lentry.dirent_type = 0;
+        lentry.chksum = checksum;
+        lentry.first_clus_low = 0;
+        lentry
+    }
 }
 
 impl ShortDirEntry {
     const PADDING: u8 = ' ' as u8;
 
     pub fn is_dir(&self) -> bool {
-        self.file_attrs.contains(FileAttributes::DIRECTORY)
+        self.file_attrs.contains(FileAttributes::DIRECTORY) &&
+            !self.file_attrs.contains(FileAttributes::VOLUME_ID)
     }
 
-    /// Taken from rust-fatfs: https://github.com/debugrafalh/rust-fatfs
+    pub fn is_file(&self) -> bool {
+        !self.file_attrs.contains(FileAttributes::DIRECTORY) &&
+            !self.file_attrs.contains(FileAttributes::VOLUME_ID)
+    }
+
+    pub fn is_vol_id(&self) -> bool {
+        !self.file_attrs.contains(FileAttributes::DIRECTORY) &&
+            self.file_attrs.contains(FileAttributes::VOLUME_ID)
+    }
+
+
+    /// Taken from rust-fatfs: https://github.com/rafalh/rust-fatfs
     fn name_to_string(&self) -> String {
         let sname_len = self.dir_name[..8].iter().rposition(|x| *x != Self::PADDING)
             .map(|l| l + 1).unwrap_or(0);
@@ -442,8 +487,8 @@ impl ShortDirEntry {
         String::from_iter(iter)
     }
 
-    pub fn to_dir_entry(&self, loc: (Cluster, u64), dir_path: &String) -> DirEntry{
-        if !self.file_attrs.contains(FileAttributes::DIRECTORY) {
+    pub fn to_dir_entry(&self, loc: (Cluster, u64), dir_path: &String) -> DirEntry {
+        if self.is_file() || self.is_vol_id() {
             let mut file = File::default();
             let f_name = self.name_to_string();
             let mut f_path = dir_path.clone();
@@ -455,7 +500,12 @@ impl ShortDirEntry {
             file.fname = f_name;
             file.short_dir_entry = self.clone();
             file.loc = (loc, loc);
-            DirEntry::File(file)
+            if self.is_file() {
+                DirEntry::File(file)
+            }
+            else {
+                DirEntry::VolID(file)
+            }
         } else {
             let mut dir = Dir::default();
             let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
@@ -475,7 +525,7 @@ impl ShortDirEntry {
     }
 
     pub fn to_dir_entry_lfn(&self, name: String, loc: ((Cluster, u64), (Cluster, u64)), dir_path: &String) -> DirEntry {
-        if !self.file_attrs.contains(FileAttributes::DIRECTORY) {
+        if self.is_file() || self.is_vol_id() {
             let mut file = File::default();
             let mut f_path = dir_path.clone();
             f_path.push('/');
@@ -486,7 +536,12 @@ impl ShortDirEntry {
             file.fname = name;
             file.short_dir_entry = self.clone();
             file.loc = loc;
-            DirEntry::File(file)
+            if self.is_file() {
+                DirEntry::File(file)
+            }
+            else {
+                DirEntry::VolID(file)
+            }
         } else {
             let mut dir = Dir::default();
             let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
@@ -777,27 +832,83 @@ pub fn get_dir_entry_raw<D: Read + Write + Seek>(fs: &mut FileSystem<D>, offset:
 #[derive(Debug, Clone)]
 pub enum DirEntry {
     File(File),
-    Dir(Dir)
+    Dir(Dir),
+    VolID(File)
 }
 
 impl DirEntry {
     pub fn short_name(&self) -> String {
         match &self {
             &DirEntry::File(f) => {
-                let s = str::from_utf8(&f.short_dir_entry.dir_name);
-                String::from(s.unwrap_or("Invalid".as_ref()))
+                f.short_dir_entry.name_to_string()
             },
             &DirEntry::Dir(d) => {
                 match d.short_dir_entry {
-                    Some(ref e) => {
-                        let s = str::from_utf8(&e.dir_name);
-                        String::from(s.unwrap_or("Invalid".as_ref()))
-                    },
-                    None => String::from("Root Dir")
+                    Some(s) => s.name_to_string(),
+                    None => String::from("/")
                 }
-
+            },
+            &DirEntry::VolID(s) => {
+                s.short_dir_entry.name_to_string()
             }
         }
+    }
+
+    fn short_name_raw(&self) -> [u8; 11] {
+        match &self {
+            &DirEntry::File(f) => f.short_dir_entry.dir_name,
+            &DirEntry::Dir(d) => {
+                match d.short_dir_entry {
+                    Some(s) => s.dir_name,
+                    None => {
+                        let mut s = [0x20u8; 11];
+                        s[0] = '/' as u8;
+                        s
+                    }
+                }
+            },
+            &DirEntry::VolID(s) => s.short_dir_entry.dir_name
+        }
+    }
+
+    fn name(&self) -> String {
+        match &self {
+            &DirEntry::File(f) => f.fname.clone(),
+            &DirEntry::Dir(d) =>  d.dir_name.clone(),
+            &DirEntry::VolID(s) => s.fname.clone()
+        }
+    }
+
+    fn is_file(&self) -> bool {
+        match self {
+            &DirEntry::File(_) | &DirEntry::VolID(_) => true,
+            _ => false
+        }
+    }
+
+    fn is_dir(&self) -> bool {
+        match &self {
+            &DirEntry::Dir(d) => true,
+            _ => false
+        }
+    }
+
+    fn is_volID(&self) -> bool {
+        match self {
+            &DirEntry::VolID(_) => true,
+            _ => false
+        }
+    }
+
+    fn eq_name(&self, name: &str) -> bool {
+        let short_name = self.short_name();
+        let long_name = self.name();
+        let long_name_upper = long_name.chars().flat_map(|c| c.to_uppercase());
+        let name_upper = name.chars().flat_map(|c| c.to_uppercase());
+        let long_name_matches = long_name_upper.eq(name_upper.clone());
+        let short_name_upper = short_name.chars().flat_map(|c| c.to_uppercase());
+        let short_name_matches = short_name_upper.eq(name_upper);
+        long_name_matches || short_name_matches
     }
 }
 
@@ -867,14 +978,37 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     (comp, rest_opt)
 }
 
-/// Following the Win NT convention from Wikipedia
+fn valid_long_name(mut name: &str) -> Result<()> {
+    name = name.trim();
+    if name.len() == 0 {
+        return Err(Error::new(ErrorKind::Other, "Empty name"));
+    }
+    if name.len() > 255 {
+        return Err(Error::new(ErrorKind::Other, "Filename too long"));
+    }
+
+    for c in name.chars() {
+        match c {
+            'a'...'z' | 'A'...'Z' | '0'...'9' => {},
+            '\u{80}'...'\u{ffff}' => {},
+            '$' |'%' | '\''| '-' | '_' | '@' | '~' | '`' | '!' | '(' | ')' | '{' | '}' | '^'
+            | '#' | '&' => {},
+            '+' | ',' | ';' | '=' | '[' | ']' => {},
+            _ => return Err(Error::new(ErrorKind::Other, "Filename contains invalid chars"))
+        }
+    }
+    Ok(())
+
+}
+
 /// https://en.wikipedia.org/wiki/8.3_filename
 #[derive(Debug, Default, Clone)]
-struct ShortNameGen {
+pub struct ShortNameGen {
     name: [u8; 11],
     is_lossy: bool,
     basename_len: u8,
     checksum_bitmask: u16,
+    checksum: u16,
     suffix_bitmask: u16,
     name_fits: bool,
     exact_match: bool,
@@ -882,6 +1016,7 @@ struct ShortNameGen {
     is_dotdot: bool
 }
 
+/// Adapted from rust-fatfs: https://github.com/rafalh/rust-fatfs
 impl ShortNameGen {
 
     const FNAME_LEN: usize = 8;
@@ -909,6 +1044,7 @@ impl ShortNameGen {
         };
         let checksum = Self::checksum(name);
         ShortNameGen {
+
             name: short_name,
             is_lossy: is_lossy,
             is_dot: name == ".",
@@ -958,8 +1094,157 @@ impl ShortNameGen {
         (sum2 << 8) | sum1
     }
 
+    // Update state of generator
+    // Needed in case LFNs are not present
+    fn add_name(&mut self, name: &[u8; 11]) {
+        // check for exact match collision
+        if name == &self.name {
+            self.exact_match = true;
+        }
+
+        // check for long prefix form collision (TEXTFI~1.TXT)
+        let prefix_len = min(self.basename_len, 6) as usize;
+        let num_suffix = if name[prefix_len] as char == '~' {
+            (name[prefix_len + 1] as char).to_digit(10)
+        } else {
+            None
+        };
+        let ext_matches = name[8..] == self.name[8..];
+        if name[..prefix_len] == self.name[..prefix_len] && num_suffix.is_some() && ext_matches {
+            let num = num_suffix.unwrap();
+            self.suffix_bitmask |= 1 << num;
+        }
+
+        // check for short prefix + checksum form collision (TE021F~1.TXT)
+        let prefix_len = min(self.basename_len, 2) as usize;
+        let num_suffix = if name[prefix_len + 4] as char == '~' {
+            (name[prefix_len + 4 + 1] as char).to_digit(10)
+        } else {
+            None
+        };
+        if name[..prefix_len] == self.name[..prefix_len] && num_suffix.is_some() && ext_matches {
+            let chksum_res = str::from_utf8(&name[prefix_len..prefix_len + 4]).map(|s| u16::from_str_radix(s, 16));
+            if chksum_res == Ok(Ok(self.checksum)) {
+                let num = num_suffix.unwrap(); // SAFE
+                self.checksum_bitmask |= 1 << num;
+            }
+        }
+
+    }
+
+    fn generate(&self) -> Result<[u8; 11]> {
+        if self.is_dot || self.is_dotdot {
+            return Ok(self.name)
+        }
+
+        if !self.is_lossy && self.name_fits && !self.exact_match {
+            // If there was no lossy conversion and name fits into
+            // 8.3 convention and there is no collision return it as is
+            return Ok(self.name);
+        }
+        // Try using long 6-characters prefix
+        for i in 1..5 {
+            if self.suffix_bitmask & (1 << i) == 0 {
+                return Ok(self.build_prefixed_name(i as u32, false));
+            }
+        }
+        // Try prefix with checksum
+        for i in 1..10 {
+            if self.checksum_bitmask & (1 << i) == 0 {
+                return Ok(self.build_prefixed_name(i as u32, true));
+            }
+        }
+        // Too many collisions - fail
+        Err(Error::new(ErrorKind::AlreadyExists, "short name already exists"))
+    }
+
+    fn next_iteration(&mut self) {
+        // Try different checksum in next iteration
+        self.checksum = (num::Wrapping(self.checksum) + num::Wrapping(1)).0;
+        // Zero bitmaps
+        self.suffix_bitmask = 0;
+        self.checksum_bitmask = 0;
+    }
+
+    fn build_prefixed_name(&self, num: u32, with_chksum: bool) -> [u8; 11] {
+        let mut buf = [0x20u8; 11];
+        let prefix_len = if with_chksum {
+            let prefix_len = min(self.basename_len as usize, 2);
+            buf[..prefix_len].copy_from_slice(&self.name[..prefix_len]);
+            buf[prefix_len..prefix_len + 4].copy_from_slice(&Self::u16_to_u8_array(self.checksum));
+            prefix_len + 4
+        } else {
+            let prefix_len = min(self.basename_len as usize, 6);
+            buf[..prefix_len].copy_from_slice(&self.name[..prefix_len]);
+            prefix_len
+        };
+        buf[prefix_len] = '~' as u8;
+        buf[prefix_len + 1] = char::from_digit(num, 10).unwrap() as u8; // SAFE
+        buf[8..].copy_from_slice(&self.name[8..]);
+        buf
+    }
+
+    fn u16_to_u8_array(x: u16) -> [u8; 4] {
+        let c1 = char::from_digit((x as u32 >> 12) & 0xF, 16).unwrap().to_ascii_uppercase() as u8;
+        let c2 = char::from_digit((x as u32 >> 8) & 0xF, 16).unwrap().to_ascii_uppercase() as u8;
+        let c3 = char::from_digit((x as u32 >> 4) & 0xF, 16).unwrap().to_ascii_uppercase() as u8;
+        let c4 = char::from_digit((x as u32 >> 0) & 0xF, 16).unwrap().to_ascii_uppercase() as u8;
+        return [c1, c2, c3, c4];
+    }
+
 }
 
+
+struct LongNameEntryGenerator {
+    name: Vec<u16>,
+    checksum: u8,
+    idx: u8,
+    last_idx: u8
+}
+
+impl LongNameEntryGenerator {
+    pub fn new(name: &str, checksum: u8) -> Self {
+        let mut n: Vec<u16> = name.chars().map(|c| c as u16).collect();
+        let pad_bytes = (13 - (n.len() % 13)) % 13;
+        for i in 0..pad_bytes {
+            if i == 0 {
+                n.push(0);
+            }
+            else {
+                n.push(0xffff);
+            }
+        }
+        let start_idx = (n.len() / 13) as u8;
+        LongNameEntryGenerator {
+            name: n,
+            checksum: checksum,
+            idx: start_idx,
+            last_idx: start_idx
+        }
+    }
+
+
+}
+
+impl Iterator for LongNameEntryGenerator {
+    type Item = LongDirEntry;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.idx {
+            0 => None,
+            n if n == self.last_idx => {
+                let ord = n | 0x40;
+                let start_idx = ((n - 1) * 13) as usize;
+                self.idx -= 1;
+                Some(LongDirEntry::new(ord, &self.name.as_slice()[start_idx..start_idx+13], self.checksum))
+            },
+            n => {
+                let start_idx = ((n - 1) * 13) as usize;
+                self.idx -= 1;
+                Some(LongDirEntry::new(n, &self.name.as_slice()[start_idx..start_idx+13], self.checksum))
+            }
+        }
+    }
+}
 /*
 impl fmt::Debug for DirEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -967,7 +1252,7 @@ impl fmt::Debug for DirEntry {
             DirEntry::File(fi) =>
                 write!(f, "File {{
                     file : {:?}
-                  }}", fi),
+                  }}", fi),impl DirEntry
             DirEntry::Dir(d) =>
                 write!(f, "Dir {{
                     dir : {:?}

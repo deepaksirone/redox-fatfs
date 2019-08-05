@@ -353,7 +353,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
                 Dir {
                     first_cluster: Cluster::new(s.root_cluster as u64),
                     dir_path: "/".to_string(),
-                    dir_name: String::new(),
+                    dir_name: String::from("/"),
                     root_offset: None,
                     short_dir_entry: None,
                     loc: None
@@ -363,7 +363,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
                 Dir {
                     first_cluster: Cluster::new(0),
                     dir_path: "/".to_string(),
-                    dir_name: String::new(),
+                    dir_name: String::from("/"),
                     root_offset: Some(self.root_dir_offset()),
                     short_dir_entry: None,
                     loc: None
