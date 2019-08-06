@@ -76,10 +76,12 @@ fn print_fat32() {
     let s = "//this/is/a/path.txt".to_string();
     let t : Vec<&str> = s.split('/').collect();
     println!("Split string : {:?}", t);
-    let root_d = fs.root_dir();
+    let mut root_d = fs.root_dir();
     let r = root_d.find_entry("heLlo.txt", None, None, &mut fs);
     println!("Trying to find heLlo.txt : {:?}", r);
 
+    println!("Attempting to remove hello.txt: {:?}", root_d.remove("/hello.txt", &mut fs));
+    println!("Attempting to remove someDir: {:?}", root_d.remove("/someDir", &mut fs));
 }
 
 fn print_fat12() {

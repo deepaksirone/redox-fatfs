@@ -5,7 +5,7 @@ use std::{num, fmt, str};
 use std::cmp::min;
 use std::char;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt, ByteOrder};
 
 use Cluster;
 use filesystem::FileSystem;
@@ -158,7 +158,245 @@ impl Dir {
          }
          Err(Error::new(ErrorKind::NotFound, "No such file or directory"))
      }
+
+    pub fn open_file<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<File> {
+        let (name, rest) = split_path(path);
+        match rest {
+            Some(r) => {
+                let e = self.find_entry(name, Some(true), None, fs)?;
+                e.to_dir().open_file(path, fs)
+            },
+            None => {
+                let e = self.find_entry(name, Some(false), None, fs)?;
+                Ok(e.to_file())
+            }
+        }
+    }
+
+    pub fn open_dir<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<Dir> {
+        let (name, rest) = split_path(path);
+        let e = self.find_entry(name, Some(true), None, fs)?;
+        match rest {
+            Some(r) => {
+                e.to_dir().open_dir(r, fs)
+            },
+            None => {
+                Ok(e.to_dir())
+            }
+        }
+    }
+
+    pub fn create_file<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<File> {
+        let (name , rest) = split_path(path);
+        if let Some(r) = rest {
+            return self.find_entry(name, Some(true), None, fs)?.to_dir().create_file(r, fs);
+        }
+
+        let r = self.check_existence(name, Some(false), fs)?;
+        match r {
+            DirEntryOrShortName::ShortName(short_name) => {
+                self.create_dir_entries(name, &short_name, None,
+                                              FileAttributes::ARCHIVE, fs).map(|e| e.to_file())
+            },
+            DirEntryOrShortName::DirEntry(e) => Ok(e.to_file())
+        }
+
+    }
+
+    pub fn create_dir<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<Dir> {
+        let (name , rest) = split_path(path);
+        if let Some(r) = rest {
+            return self.find_entry(name, Some(true), None, fs)?.to_dir().create_dir(r, fs);
+        }
+
+        let r = self.check_existence(name, Some(true), fs)?;
+        match r {
+            DirEntryOrShortName::ShortName(short_name) => {
+                let mut short_entry = ShortDirEntry::default();
+                let f_cluster = allocate_cluster(fs, None)?;
+                short_entry.set_first_cluster(f_cluster);
+
+                let mut offset = 0;
+                let mut dot_entry = ShortDirEntry::default();
+                dot_entry.dir_name = ShortNameGen::new(".").generate().unwrap();
+                dot_entry.file_attrs = FileAttributes::DIRECTORY;
+                dot_entry.set_first_cluster(f_cluster);
+                dot_entry.flush(fs.cluster_offset(f_cluster) + offset, fs)?;
+                //TODO Set time
+                offset += DIR_ENTRY_LEN;
+
+                let mut dot_entry = ShortDirEntry::default();
+                dot_entry.dir_name = ShortNameGen::new("..").generate().unwrap();
+                dot_entry.file_attrs = FileAttributes::DIRECTORY;
+                dot_entry.set_first_cluster(self.first_cluster);
+                //TODO Set Time
+                dot_entry.flush(fs.cluster_offset(f_cluster) + offset, fs)?;
+
+
+                self.create_dir_entries(name, &short_name, Some(short_entry),
+                                        FileAttributes::DIRECTORY, fs).map(|e| e.to_dir())
+            },
+            DirEntryOrShortName::DirEntry(e) => Ok(e.to_dir())
+        }
+    }
+
+    fn check_existence<D: Read + Write + Seek>(&self, name: &str, expected_dir: Option<bool>,
+                                               fs: &mut FileSystem<D>) -> Result<DirEntryOrShortName> {
+        let mut sng = ShortNameGen::new(name);
+        loop {
+            let e = self.find_entry(name, expected_dir, Some(&mut sng), fs);
+            match e {
+                Err(ref e) if e.kind() == ErrorKind::NotFound => {},
+                Err(err) => return Err(err),
+                Ok(e) => return Ok(DirEntryOrShortName::DirEntry(e))
+             }
+            if let Ok(name) = sng.generate() {
+                return Ok(DirEntryOrShortName::ShortName(name))
+            }
+            sng.next_iteration();
+        }
+
+    }
+
+    fn create_dir_entries<D: Read + Write + Seek>(&self, lname: &str, sname: &[u8; 11],
+                                                  short_entry: Option<ShortDirEntry>,
+                                                  fattrs: FileAttributes, fs: &mut FileSystem<D>) -> Result<DirEntry> {
+        let mut short_entry = short_entry.unwrap_or(ShortDirEntry::default());
+        short_entry.dir_name = sname.clone();
+        short_entry.file_attrs = fattrs;
+        //TODO: Modification/Creation Time
+
+        let mut lng = LongNameEntryGenerator::new(lname, short_entry.compute_checksum());
+        let num_entries = lng.num_entries() as u64 + 1;
+        let free_entries = self.find_free_entries(num_entries, fs)?;
+        let start_loc = match free_entries {
+            Some(c) => c,
+            None => return Err(Error::new(ErrorKind::Other, "No space left in dir/disk"))
+        };
+
+        let offsets: Vec<(Cluster, u64)> = DirEntryOffsetIter::new(start_loc, fs, num_entries, None).collect();
+        for off in &offsets.as_slice()[..offsets.len() - 1] {
+            let le: LongDirEntry = lng.next().unwrap(); // SAFE
+            let offset = fs.cluster_offset(off.0) + off.1;
+            le.flush(offset, fs)?;
+        }
+
+        let start = offsets[0];
+        let end = *offsets.last().unwrap();
+        let offset = fs.cluster_offset(end.0) + end.1;
+        short_entry.flush(offset, fs)?;
+        Ok(short_entry.to_dir_entry_lfn(lname.to_string(), (start, end), &self.dir_path))
+    }
+
+    fn is_empty<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>) -> bool {
+        for e in self.to_iter(fs) {
+            let s = e.short_name();
+            if s == "." || s == ".." {
+                continue;
+            }
+            return false
+        }
+        true
+    }
+
+
+    pub fn remove<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<()> {
+        let (name, rest) = split_path(path);
+        if let Some(r) = rest {
+            return self.find_entry(name, Some(true), None, fs)?.to_dir().remove(r, fs);
+        }
+
+        let e = self.find_entry(name, None, None, fs)?;
+        if e.is_dir() && !e.to_dir().is_empty(fs) {
+            return Err(Error::new(ErrorKind::Other, "Directory not empty"));
+        }
+
+        if e.first_cluster().cluster_number >= 2 {
+            deallocate_cluster_chain(fs, e.first_cluster())?
+        }
+
+        if e.get_dir_range().is_some() {
+            self.remove_dir_entries(e.get_dir_range().unwrap(), fs)?
+        }
+
+        Ok(())
+
+    }
+
+    fn remove_dir_entries<D: Read + Write + Seek>(&self, rng: ((Cluster, u64), (Cluster, u64)),
+                                                  fs: &mut FileSystem<D>) -> Result<()> {
+        let offsets: Vec<(Cluster, u64)> = DirEntryOffsetIter::new(rng.0, fs, 15, Some(rng.1)).collect();
+        for off in offsets {
+            let offset = fs.cluster_offset(off.0) + off.1;
+            let mut s_entry = ShortDirEntry::default();
+            s_entry.dir_name[0] = 0xe5;
+            s_entry.flush(offset, fs)?;
+        }
+        Ok(())
+    }
 }
+
+struct DirEntryOffsetIter<'a, D: Read + Write + Seek> {
+    start_offset: (Cluster, u64),
+    current_offset: (Cluster, u64),
+    end_offset: Option<(Cluster, u64)>,
+    fs: &'a mut FileSystem<D>,
+    idx: u64,
+    len: u64,
+    fin: bool
+}
+
+impl<'a, D: Read + Write + Seek> DirEntryOffsetIter<'a, D> {
+    fn new(start: (Cluster, u64), fs: &'a mut FileSystem<D>,
+           len: u64, end_offset: Option<(Cluster, u64)>) -> DirEntryOffsetIter<'a, D> {
+        DirEntryOffsetIter {
+            start_offset: start,
+            current_offset: start,
+            end_offset,
+            fs,
+            idx: 0,
+            len,
+            fin: false
+        }
+    }
+}
+
+impl<'a, D: Read + Write + Seek> Iterator for DirEntryOffsetIter<'a, D> {
+    type Item = (Cluster, u64);
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx == self.len || self.fin {
+            return None
+        }
+
+        let r = self.current_offset;
+        let mut new_offset = r.1 + DIR_ENTRY_LEN;
+        let mut new_cluster = r.0;
+        if new_offset >= self.fs.bytes_per_cluster() {
+            new_offset = new_offset % self.fs.bytes_per_cluster();
+            match get_entry(self.fs, new_cluster) {
+                Ok(FatEntry::Next(c)) => {
+                    new_cluster = c;
+
+                },
+                _ => {
+                    return None;
+                }
+            }
+        }
+        if let Some(off) = self.end_offset {
+            self.fin = off == self.current_offset;
+        }
+
+        self.current_offset = (new_cluster, new_offset);
+        self.idx += 1;
+
+
+
+        Some(r)
+    }
+}
+
+
 
 impl File {
     pub fn size(&self) -> u64 {
@@ -440,6 +678,29 @@ impl LongDirEntry {
         lentry.chksum = checksum;
         lentry.first_clus_low = 0;
         lentry
+    }
+
+    fn flush<D: Read + Write + Seek>(&self, offset: u64, fs: &mut FileSystem<D>) -> Result<()> {
+        fs.seek_to(offset)?;
+        fs.disk.borrow_mut().write_u8(self.ord)?;
+        //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name1)?;
+        for b in &self.name1 {
+            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b);
+        }
+
+        fs.disk.borrow_mut().write_u8(self.file_attrs.bits);
+        fs.disk.borrow_mut().write_u8(self.dirent_type);
+        fs.disk.borrow_mut().write_u8(self.chksum);
+        //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name2)?;
+        for b in &self.name2 {
+            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b);
+        }
+        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.first_clus_low);
+        //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name3)?;
+        for b in &self.name3 {
+            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b);
+        }
+        Ok(())
     }
 }
 
@@ -836,6 +1097,11 @@ pub enum DirEntry {
     VolID(File)
 }
 
+pub enum DirEntryOrShortName {
+    DirEntry(DirEntry),
+    ShortName([u8; 11])
+}
+
 impl DirEntry {
     pub fn short_name(&self) -> String {
         match &self {
@@ -850,6 +1116,34 @@ impl DirEntry {
             },
             &DirEntry::VolID(s) => {
                 s.short_dir_entry.name_to_string()
+            }
+        }
+    }
+
+    fn first_cluster(&self) -> Cluster {
+        match &self {
+            &DirEntry::File(f) => {
+                f.first_cluster
+            },
+            &DirEntry::Dir(d) => {
+                d.first_cluster
+            },
+            &DirEntry::VolID(s) => {
+                s.first_cluster
+            }
+        }
+    }
+
+    fn get_dir_range(&self) -> Option<((Cluster, u64), (Cluster, u64))>{
+        match &self {
+            &DirEntry::File(f) => {
+                Some(f.loc)
+            },
+            &DirEntry::Dir(d) => {
+                d.loc
+            },
+            &DirEntry::VolID(s) => {
+                Some(s.loc)
             }
         }
     }
@@ -897,6 +1191,22 @@ impl DirEntry {
         match self {
             &DirEntry::VolID(_) => true,
             _ => false
+        }
+    }
+
+    fn to_file(&self) -> File {
+        assert!(self.is_file(), "Not a file");
+        match &self {
+            DirEntry::File(f) | DirEntry::VolID(f) => f.clone(),
+            _ => unreachable!()
+        }
+    }
+
+    fn to_dir(&self) -> Dir {
+        assert!(self.is_dir(), "Not a directory");
+        match &self {
+            DirEntry::Dir(d) => d.clone(),
+            _ => unreachable!()
         }
     }
 
@@ -1221,6 +1531,10 @@ impl LongNameEntryGenerator {
             idx: start_idx,
             last_idx: start_idx
         }
+    }
+
+    pub fn num_entries(&self) -> u8 {
+        self.last_idx
     }
 
 
