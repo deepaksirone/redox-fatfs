@@ -82,6 +82,10 @@ fn print_fat32() {
 
     println!("Attempting to remove hello.txt: {:?}", root_d.remove("/hello.txt", &mut fs));
     println!("Attempting to remove someDir: {:?}", root_d.remove("/someDir", &mut fs));
+    let hello = root_d.create_file("/hello1.txt", &mut fs).expect("Error Creating hello.txt");
+    println!("Created hello.txt");
+    let r = Dir::rename(&DirEntry::File(hello), "/hello2.txt", &mut fs);
+    println!("Attempting to move hello1.txt to hello2.txt : {:?}", r);
 }
 
 fn print_fat12() {
@@ -186,11 +190,18 @@ fn short_names()
 {
     let s = ".";
     let s1 = "....hello...txt";
-
+    let p = "/this/is/a/path/a.txt/";
     let e = s.rfind('.').unwrap();
     println!(". r find: {:?}", e);
     println!("Printing slice: {:?}", &s.as_bytes()[..e]);
     println!("IStrue : {:?}", s == ".");
     println!("Period Stripped: {:?}", s1.trim_start_matches("."));
+    println!("Reverse Split path :{:?}", rsplit_path(p));
 }
 
+fn rsplit_path(path: &str) -> (&str, Option<&str>) {
+    let mut path_split = path.trim_matches('/').rsplitn(2, "/");
+    let comp = path_split.next().unwrap();
+    let rest_opt = path_split.next();
+    (comp, rest_opt)
+}

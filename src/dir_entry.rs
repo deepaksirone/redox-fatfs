@@ -334,6 +334,149 @@ impl Dir {
         }
         Ok(())
     }
+
+    pub fn get_entry<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<DirEntry> {
+        let (name, rest) = split_path(path);
+
+        match rest {
+            Some(r) => {
+                let e = self.find_entry(name, Some(true), None, fs)?;
+                e.to_dir().get_entry(r, fs)
+            },
+            None => {
+                // If path was "/" then return the current dir
+                if name.len() == 0 {
+                    return Ok(DirEntry::Dir(self.clone()))
+                }
+                self.find_entry(name, None, None, fs)
+            }
+        }
+    }
+
+    pub fn get_entry_abs<D: Read + Write + Seek>(path: &str, fs: &mut FileSystem<D>) -> Result<DirEntry> {
+        let root_dir = fs.root_dir();
+        //println!("Getting abs entry for {:?}", path);
+        root_dir.get_entry(path, fs)
+    }
+
+    //TODO: Check if src_path is an ancestor of dst_path
+    pub fn rename<D: Read + Write + Seek>(src_entry: &DirEntry, dst_path: &str, fs: &mut FileSystem<D>) -> Result<()> {
+        /*let (src_file, src_dir_path) = rsplit_path(src_path);
+        let src_entry = self.get_entry(src_path, fs)?;
+        let src_dir = match src_dir_path {
+            None => self.clone(),
+            Some(r) => {
+                match self.get_entry(r, fs)? {
+                    Ok(DirEntry::Dir(d)) => DirEntry::Dir(d),
+                    Err(e) => return Err(e),
+                    _ => return Err(Error::new(ErrorKind::Other, "Invalid source path"))
+                }
+            }
+        };*/
+
+        let (dst_name, dst_dir_path) = rsplit_path(dst_path);
+
+
+        let dst_dir = match dst_dir_path {
+            None => fs.root_dir(),
+            Some(r) => {
+                match Self::get_entry_abs(r, fs) {
+                    Ok(DirEntry::Dir(d)) => d,
+                    // Parent dir not found
+                    Err(e) => return Err(e),
+                    //Not a Directory
+                    _ => return Err(Error::new(ErrorKind::Other, "Invalid destination path"))
+                }
+            }
+        };
+
+        let parent_dir_path = src_entry.dir_path();
+        let src_dir = match Self::get_parent(parent_dir_path.as_str(), fs) {
+            Ok(Some(d)) => d,
+            _ => return Err(Error::new(ErrorKind::Other, "Src directory not found"))
+        };
+
+        // Ensures src and dst are of the same type
+        match dst_dir.check_existence(dst_name, Some(src_entry.is_dir()), fs)? {
+            DirEntryOrShortName::DirEntry(e) => {
+                let s_name = e.short_name_raw();
+                dst_dir.remove(dst_name, fs)?;
+                match e {
+                    DirEntry::File(f) | DirEntry::VolID(f) => {
+                        let short_entry = src_entry.short_dir_entry().unwrap();
+                        //TODO: Modification time
+                        dst_dir.create_dir_entries(f.fname.as_str(), &s_name, Some(short_entry), short_entry.file_attrs, fs)?;
+                        src_dir.remove(src_entry.name().as_str(), fs)?;
+
+                    },
+                    DirEntry::Dir(d) => {
+                        let mut short_entry = src_entry.short_dir_entry();
+                        if let Some(se) = short_entry {
+                            dst_dir.create_dir_entries(d.dir_name.as_str(), &s_name, Some(se), se.file_attrs, fs)?;
+                            src_dir.remove(src_entry.name().as_str(), fs)?;
+                        }
+                        else {
+                            return Err(Error::new(ErrorKind::PermissionDenied, "Cannot move root dir"));
+                        }
+
+
+                    }
+
+                }
+
+            },
+            DirEntryOrShortName::ShortName(s) => {
+                println!("Creating a new Entry");
+                let mut short_entry = src_entry.short_dir_entry();
+                if let Some(se) = short_entry {
+                    dst_dir.create_dir_entries(dst_name, &s, Some(se), se.file_attrs, fs)?;
+                    src_dir.remove(src_entry.name().as_str(), fs)?;
+                }
+                else {
+                    return Err(Error::new(ErrorKind::PermissionDenied, "Cannot move root dir"));
+                }
+
+            }
+        };
+
+        Ok(())
+
+
+
+
+        /*
+        if src_entry.is_file() && dst_entry.is_dir() {
+            return Err(Error::new(ErrorKind::Other, "Cannot move file to directory"))
+        }
+
+        if src_entry.is_dir() && dst_entry.is_file() {
+            return Err(Error::new(ErrorKind::Other, "Cannot move directory to file"))
+        }*/
+
+        /*
+        let existing = dst_dir.check_existence(dst_file, None, fs)?;
+        let short_name = match r {
+            DirEntryOrShortName::DirEntry(ref dst_e) => {
+                // check if source and destination entry is the same
+
+                return Err(Error::new(ErrorKind::AlreadyExists, "Destination file already exists"));
+            },
+            DirEntryOrShortName::ShortName(short_name) => short_name,
+        };*/
+
+    }
+
+    fn get_parent<D: Read + Write + Seek>(abs_path: &str, fs: &mut FileSystem<D>) -> Result<Option<Dir>> {
+        let root_dir = fs.root_dir();
+        let (_, parent_path) = rsplit_path(abs_path);
+        println!("Parent dir path: {:?} for abs path : {:?}", parent_path, abs_path);
+        match parent_path {
+            Some(p) => root_dir.get_entry(p, fs).map(|x|
+                if x.is_dir() { Some(x.to_dir()) } else { None }),
+            None => Ok(Some(root_dir))
+        }
+
+    }
 }
 
 struct DirEntryOffsetIter<'a, D: Read + Write + Seek> {
@@ -753,8 +896,9 @@ impl ShortDirEntry {
             let mut file = File::default();
             let f_name = self.name_to_string();
             let mut f_path = dir_path.clone();
-            f_path.push('/');
+
             f_path.push_str(&f_name.clone());
+            f_path.push('/');
             let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
             file.first_cluster = cluster;
             file.file_path = f_path;
@@ -773,8 +917,9 @@ impl ShortDirEntry {
             dir.first_cluster = cluster;
             let dir_name = self.name_to_string();
             let mut d_path = dir_path.clone();
-            d_path.push('/');
+
             d_path.push_str(&dir_name.clone());
+            d_path.push('/');
             dir.dir_path = d_path;
             dir.dir_name = dir_name;
             dir.root_offset = None;
@@ -789,8 +934,9 @@ impl ShortDirEntry {
         if self.is_file() || self.is_vol_id() {
             let mut file = File::default();
             let mut f_path = dir_path.clone();
-            f_path.push('/');
+
             f_path.push_str(&name.clone());
+            f_path.push('/');
             let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
             file.first_cluster = cluster;
             file.file_path = f_path;
@@ -808,8 +954,9 @@ impl ShortDirEntry {
             let cluster = Cluster::new((self.fst_clus_lo as u64) | ((self.fst_clst_hi as u64) << 16));
             dir.first_cluster = cluster;
             let mut d_path = dir_path.clone();
-            d_path.push('/');
+
             d_path.push_str(&name.clone());
+            d_path.push('/');
             dir.dir_path = d_path;
             dir.dir_name = name;
             dir.root_offset = None;
@@ -1120,6 +1267,20 @@ impl DirEntry {
         }
     }
 
+    fn short_dir_entry(&self) -> Option<ShortDirEntry> {
+        match &self {
+            &DirEntry::File(f) => {
+                Some(f.short_dir_entry)
+            },
+            &DirEntry::Dir(d) => {
+                d.short_dir_entry
+            },
+            &DirEntry::VolID(s) => {
+                Some(s.short_dir_entry)
+            }
+        }
+    }
+
     fn first_cluster(&self) -> Cluster {
         match &self {
             &DirEntry::File(f) => {
@@ -1220,6 +1381,16 @@ impl DirEntry {
         let short_name_matches = short_name_upper.eq(name_upper);
         long_name_matches || short_name_matches
     }
+
+    fn dir_path(&self) -> String {
+        match &self {
+            &DirEntry::File(f) => f.file_path.clone(),
+            &DirEntry::Dir(d) => d.dir_path.clone(),
+            &DirEntry::VolID(s) => s.file_path.clone()
+        }
+    }
+
+
 }
 
 struct LongNameGen {
@@ -1283,6 +1454,13 @@ impl LongNameGen {
 /// Taken from rust-fatfs: https://github.com/rafalh/rust-fatfs
 fn split_path(path: &str) -> (&str, Option<&str>) {
     let mut path_split = path.trim_matches('/').splitn(2, "/");
+    let comp = path_split.next().unwrap();
+    let rest_opt = path_split.next();
+    (comp, rest_opt)
+}
+
+fn rsplit_path(path: &str) -> (&str, Option<&str>) {
+    let mut path_split = path.trim_matches('/').rsplitn(2, "/");
     let comp = path_split.next().unwrap();
     let rest_opt = path_split.next();
     (comp, rest_opt)
