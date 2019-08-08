@@ -4,6 +4,8 @@
 extern crate log;
 
 extern crate syscall;
+extern crate spin;
+
 extern crate byteorder;
 #[macro_use]
 extern crate bitflags;

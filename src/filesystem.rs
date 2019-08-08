@@ -501,6 +501,8 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         Ok(())
     }
 
+    //pub fn flush()
+
 }
 
 impl<D: Read + Write + Seek> Drop for FileSystem<D> {

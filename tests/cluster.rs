@@ -84,7 +84,7 @@ fn print_fat32() {
     println!("Attempting to remove someDir: {:?}", root_d.remove("/someDir", &mut fs));
     let hello = root_d.create_file("/hello1.txt", &mut fs).expect("Error Creating hello.txt");
     println!("Created hello.txt");
-    let r = Dir::rename(&DirEntry::File(hello), "/hello2.txt", &mut fs);
+    let r = Dir::rename(&mut DirEntry::File(hello), "/hello2.txt", &mut fs);
     println!("Attempting to move hello1.txt to hello2.txt : {:?}", r);
 }
 

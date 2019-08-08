@@ -360,7 +360,7 @@ impl Dir {
     }
 
     //TODO: Check if src_path is an ancestor of dst_path
-    pub fn rename<D: Read + Write + Seek>(src_entry: &DirEntry, dst_path: &str, fs: &mut FileSystem<D>) -> Result<()> {
+    pub fn rename<D: Read + Write + Seek>(src_entry: &mut DirEntry, dst_path: &str, fs: &mut FileSystem<D>) -> Result<()> {
         /*let (src_file, src_dir_path) = rsplit_path(src_path);
         let src_entry = self.get_entry(src_path, fs)?;
         let src_dir = match src_dir_path {
@@ -385,7 +385,7 @@ impl Dir {
                     // Parent dir not found
                     Err(e) => return Err(e),
                     //Not a Directory
-                    _ => return Err(Error::new(ErrorKind::Other, "Invalid destination path"))
+                    _ => return Err(Error::new(ErrorKind::InvalidInput, "Invalid destination path"))
                 }
             }
         };
@@ -393,11 +393,11 @@ impl Dir {
         let parent_dir_path = src_entry.dir_path();
         let src_dir = match Self::get_parent(parent_dir_path.as_str(), fs) {
             Ok(Some(d)) => d,
-            _ => return Err(Error::new(ErrorKind::Other, "Src directory not found"))
+            _ => return Err(Error::new(ErrorKind::NotFound, "Src directory not found"))
         };
 
         // Ensures src and dst are of the same type
-        match dst_dir.check_existence(dst_name, Some(src_entry.is_dir()), fs)? {
+        let dir_ent_updated  = match dst_dir.check_existence(dst_name, Some(src_entry.is_dir()), fs)? {
             DirEntryOrShortName::DirEntry(e) => {
                 let s_name = e.short_name_raw();
                 dst_dir.remove(dst_name, fs)?;
@@ -405,15 +405,17 @@ impl Dir {
                     DirEntry::File(f) | DirEntry::VolID(f) => {
                         let short_entry = src_entry.short_dir_entry().unwrap();
                         //TODO: Modification time
-                        dst_dir.create_dir_entries(f.fname.as_str(), &s_name, Some(short_entry), short_entry.file_attrs, fs)?;
+                        let dirent= dst_dir.create_dir_entries(f.fname.as_str(), &s_name, Some(short_entry), short_entry.file_attrs, fs)?;
                         src_dir.remove(src_entry.name().as_str(), fs)?;
+                        dirent
 
                     },
                     DirEntry::Dir(d) => {
                         let mut short_entry = src_entry.short_dir_entry();
                         if let Some(se) = short_entry {
-                            dst_dir.create_dir_entries(d.dir_name.as_str(), &s_name, Some(se), se.file_attrs, fs)?;
+                            let dirent = dst_dir.create_dir_entries(d.dir_name.as_str(), &s_name, Some(se), se.file_attrs, fs)?;
                             src_dir.remove(src_entry.name().as_str(), fs)?;
+                            dirent
                         }
                         else {
                             return Err(Error::new(ErrorKind::PermissionDenied, "Cannot move root dir"));
@@ -424,20 +426,25 @@ impl Dir {
 
                 }
 
+
             },
             DirEntryOrShortName::ShortName(s) => {
                 println!("Creating a new Entry");
                 let mut short_entry = src_entry.short_dir_entry();
                 if let Some(se) = short_entry {
-                    dst_dir.create_dir_entries(dst_name, &s, Some(se), se.file_attrs, fs)?;
+                    let dirent = dst_dir.create_dir_entries(dst_name, &s, Some(se), se.file_attrs, fs)?;
                     src_dir.remove(src_entry.name().as_str(), fs)?;
+                    dirent
                 }
                 else {
                     return Err(Error::new(ErrorKind::PermissionDenied, "Cannot move root dir"));
                 }
-
             }
         };
+
+        *src_entry = dir_ent_updated;
+        //src_entry.set_fname(dst_name, &short_name);
+        //src_entry.set_fpath(dst_path);
 
         Ok(())
 
@@ -466,7 +473,7 @@ impl Dir {
 
     }
 
-    fn get_parent<D: Read + Write + Seek>(abs_path: &str, fs: &mut FileSystem<D>) -> Result<Option<Dir>> {
+    pub fn get_parent<D: Read + Write + Seek>(abs_path: &str, fs: &mut FileSystem<D>) -> Result<Option<Dir>> {
         let root_dir = fs.root_dir();
         let (_, parent_path) = rsplit_path(abs_path);
         println!("Parent dir path: {:?} for abs path : {:?}", parent_path, abs_path);
@@ -1266,6 +1273,37 @@ impl DirEntry {
             }
         }
     }
+    /*
+    fn set_fname(&mut self, lfn: &str, sfn: &[u8; 11]) {
+        match &mut self {
+            &mut DirEntry::File(f) => {
+                f.fname = lfn.to_string();
+                f.short_dir_entry.dir_name = sfn.clone();
+            },
+            &mut DirEntry::Dir(d) => {
+                d.dir_name = lfn.to_string();
+                d.short_dir_entry.dir_name = sfn.clone();
+            },
+            &mut DirEntry::VolID(f) => {
+                f.fname = lfn.to_string();
+                f.short_dir_entry.dir_name = sfn.clone();
+            }
+        }
+    }
+
+    fn set_fpath(&mut self, path: &str) {
+        match &mut self {
+            &mut DirEntry::File(f) => {
+                f.file_path = path.to_string();
+            },
+            &mut DirEntry::Dir(d) => {
+                d.dir_path = path.to_string();
+            },
+            &mut DirEntry::VolID(f) => {
+                f.file_path = path.to_string();
+            }
+        }
+    }*/
 
     fn short_dir_entry(&self) -> Option<ShortDirEntry> {
         match &self {
@@ -1326,7 +1364,7 @@ impl DirEntry {
         }
     }
 
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         match &self {
             &DirEntry::File(f) => f.fname.clone(),
             &DirEntry::Dir(d) =>  d.dir_name.clone(),
@@ -1341,21 +1379,21 @@ impl DirEntry {
         }
     }
 
-    fn is_dir(&self) -> bool {
+    pub fn is_dir(&self) -> bool {
         match &self {
             &DirEntry::Dir(d) => true,
             _ => false
         }
     }
 
-    fn is_volID(&self) -> bool {
+    pub fn is_volID(&self) -> bool {
         match self {
             &DirEntry::VolID(_) => true,
             _ => false
         }
     }
 
-    fn to_file(&self) -> File {
+    pub fn to_file(&self) -> File {
         assert!(self.is_file(), "Not a file");
         match &self {
             DirEntry::File(f) | DirEntry::VolID(f) => f.clone(),
@@ -1363,7 +1401,7 @@ impl DirEntry {
         }
     }
 
-    fn to_dir(&self) -> Dir {
+    pub fn to_dir(&self) -> Dir {
         assert!(self.is_dir(), "Not a directory");
         match &self {
             DirEntry::Dir(d) => d.clone(),
@@ -1469,10 +1507,10 @@ fn rsplit_path(path: &str) -> (&str, Option<&str>) {
 fn valid_long_name(mut name: &str) -> Result<()> {
     name = name.trim();
     if name.len() == 0 {
-        return Err(Error::new(ErrorKind::Other, "Empty name"));
+        return Err(Error::new(ErrorKind::InvalidInput, "Empty name"));
     }
     if name.len() > 255 {
-        return Err(Error::new(ErrorKind::Other, "Filename too long"));
+        return Err(Error::new(ErrorKind::InvalidInput, "Filename too long"));
     }
 
     for c in name.chars() {
@@ -1482,7 +1520,7 @@ fn valid_long_name(mut name: &str) -> Result<()> {
             '$' |'%' | '\''| '-' | '_' | '@' | '~' | '`' | '!' | '(' | ')' | '{' | '}' | '^'
             | '#' | '&' => {},
             '+' | ',' | ';' | '=' | '[' | ']' => {},
-            _ => return Err(Error::new(ErrorKind::Other, "Filename contains invalid chars"))
+            _ => return Err(Error::new(ErrorKind::InvalidInput, "Filename contains invalid chars"))
         }
     }
     Ok(())
