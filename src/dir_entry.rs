@@ -481,7 +481,7 @@ impl Dir {
     pub fn get_parent<D: Read + Write + Seek>(abs_path: &str, fs: &mut FileSystem<D>) -> Result<Option<Dir>> {
         let root_dir = fs.root_dir();
         let (_, parent_path) = rsplit_path(abs_path);
-        println!("Parent dir path: {:?} for abs path : {:?}", parent_path, abs_path);
+        //println!("Parent dir path: {:?} for abs path : {:?}", parent_path, abs_path);
         match parent_path {
             Some(p) => root_dir.get_entry(p, fs).map(|x|
                 if x.is_dir() { Some(x.to_dir()) } else { None }),
@@ -635,8 +635,8 @@ impl File {
             }
 
             let end_len = min((fs.bytes_per_cluster() - cluster_offset) as usize, buf.len() - written);
-            println!("Cluster = {:?}, Cluster Offset = {:?}, Cluster Size = {:?}, start = {:?}, end = {:?}",
-                     current_cluster, cluster_offset, fs.bytes_per_cluster(), start, start + end_len);
+            //println!("Cluster = {:?}, Cluster Offset = {:?}, Cluster Size = {:?}, start = {:?}, end = {:?}",
+            //         current_cluster, cluster_offset, fs.bytes_per_cluster(), start, start + end_len);
             let offset = fs.cluster_offset(current_cluster) + cluster_offset;
             let w = fs.write_to(offset, &buf[start..start + end_len])?;
 
@@ -679,7 +679,7 @@ impl File {
 
             let mut current_cluster = last_cluster;
             for _i in 0..clusters_req {
-                println!("[info] Allocating Cluster for length req");
+                //println!("[info] Allocating Cluster for length req");
                 current_cluster = allocate_cluster(fs, Some(current_cluster))?;
             }
         }
@@ -717,7 +717,7 @@ impl File {
             return Ok(())
         }
 
-        println!("Zeroing Range: {} - {}", range_start, range_end);
+        //println!("Zeroing Range: {} - {}", range_start, range_end);
         let zeroes = vec![0; (range_end - range_start + 1) as usize];
         fs.write_to(range_start, zeroes.as_slice())?;
         Ok(())
@@ -1515,6 +1515,7 @@ fn rsplit_path(path: &str) -> (&str, Option<&str>) {
 
 fn valid_long_name(mut name: &str) -> Result<()> {
     name = name.trim();
+    //println!("Validating name: {:?}", name);
     if name.len() == 0 {
         return Err(Error::new(ErrorKind::InvalidInput, "Empty name"));
     }
@@ -1528,7 +1529,7 @@ fn valid_long_name(mut name: &str) -> Result<()> {
             '\u{80}'..='\u{ffff}' => {},
             '$' |'%' | '\''| '-' | '_' | '@' | '~' | '`' | '!' | '(' | ')' | '{' | '}' | '^'
             | '#' | '&' => {},
-            '+' | ',' | ';' | '=' | '[' | ']' => {},
+            '+' | ',' | ';' | '=' | '[' | ']' | '.' | ' ' => {},
             _ => return Err(Error::new(ErrorKind::InvalidInput, "Filename contains invalid chars"))
         }
     }

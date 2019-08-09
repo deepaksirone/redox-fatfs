@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-
+#[test]
 fn print_fat32() {
     let f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -86,6 +86,12 @@ fn print_fat32() {
     println!("Created hello.txt");
     let r = Dir::rename(&mut DirEntry::File(hello), "/hello2.txt", &mut fs);
     println!("Attempting to move hello1.txt to hello2.txt : {:?}", r);
+    let mut dir1 = root_d.create_dir("/dir1/", &mut fs).expect("Error creating dir1");
+    println!("Created dir1");
+    let mut dir2 = dir1.create_dir("/dir2", &mut fs).expect("Error creating dir2");
+    println!("Created dir2");
+    let hello2 =dir2.create_file("/hello2.txt/", &mut fs);
+
 }
 
 fn print_fat12() {
@@ -185,7 +191,7 @@ fn print_fat16() {
     }
 }
 
-#[test]
+
 fn short_names()
 {
     let s = ".";
