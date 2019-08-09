@@ -1,13 +1,12 @@
-#![deny(warnings)]
-#![cfg_attr(unix, feature(libc))]
+#![cfg_attr(not(target_os = "redox"), feature(libc))]
 
-#[cfg(unix)]
+#[cfg(not(target_os = "redox"))]
 extern crate libc;
-
-extern crate redox_fatfs;
 
 #[cfg(target_os = "redox")]
 extern crate syscall;
+
+extern crate redox_fatfs;
 
 extern crate uuid;
 
@@ -27,6 +26,7 @@ extern "C" fn unmount_handler(_s: usize) {
     redox_fatfs::IS_UMT.store(1, Ordering::SeqCst);
 }
 
+
 #[cfg(target_os = "redox")]
 //set up a signal handler on redox, this implements unmounting. I have no idea what sa_flags is
 //for, so I put 2. I don't think 0,0 is a valid sa_mask. I don't know what i'm doing here. When u
@@ -43,20 +43,25 @@ fn setsig() {
     sigaction(SIGTERM, Some(&sig_action), None).unwrap();
 }
 
-#[cfg(unix)]
+#[cfg(not(target_os = "redox"))]
 // on linux, this is implemented properly, so no need for this unscrupulous nonsense!
 fn setsig() {
     ()
 }
 
-#[cfg(unix)]
+#[cfg(not(target_os = "redox"))]
 fn fork() -> isize {
     unsafe { libc::fork() as isize }
 }
 
-#[cfg(unix)]
+#[cfg(not(target_os = "redox"))]
 fn pipe(pipes: &mut [i32; 2]) -> isize {
     unsafe { libc::pipe(pipes.as_mut_ptr()) as isize }
+}
+
+#[cfg(not(target_os = "redox"))]
+fn capability_mode() {
+    ()
 }
 
 #[cfg(target_os = "redox")]
@@ -68,6 +73,12 @@ fn fork() -> isize {
 fn pipe(pipes: &mut [usize; 2]) -> isize {
     syscall::Error::mux(syscall::pipe2(pipes, 0)) as isize
 }
+
+#[cfg(target_os = "redox")]
+fn capability_mode() {
+    syscall::setrens(0, 0).expect("redoxfs: failed to enter null namespace");
+}
+
 
 fn usage() {
     println!("redox-fatfs [mountpoint_base] --uid [uid] --gid [gid] --mode [mode]");
