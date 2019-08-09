@@ -359,7 +359,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
     fn utimens(&mut self, times: &[TimeSpec], uid: u32, fs: &mut FileSystem<D>) -> Result<usize> {
 
 
-        if  uid == self.uid.unwrap_or(0) || self.uid.unwrap_or(0) == 0 {
+        if uid == self.uid.unwrap_or(0) || self.uid.unwrap_or(0) == 0 {
             /*if let Some(mtime) = times.get(1) {
                 //TODO
                 /*

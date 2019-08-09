@@ -22,6 +22,8 @@ use super::result::from;
 use super::resource::{Resource, DirResource, FileResource};
 use super::spin::Mutex;
 
+const FMAP_AMOUNT: usize = 1024;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FmapKey {
     pub block: u64,
@@ -47,6 +49,11 @@ const MODE_WRITE: u16 = 0o2;
 const MODE_READ: u16 = 0o4;
 
 pub struct Fmaps(Vec<Option<(FmapKey, FmapValue)>>);
+impl Default for Fmaps {
+    fn default() -> Fmaps {
+        Fmaps(vec![None; FMAP_AMOUNT])
+    }
+}
 
 pub struct FileScheme<D: Read + Write + Seek> {
     name: String,
@@ -80,8 +87,21 @@ impl<D: Read + Write + Seek> FileScheme<D> {
         perm & op == op
     }
 
-    pub fn owner(&self, uid: u32) -> bool {
+    fn owner(&self, uid: u32) -> bool {
         uid == 0 || self.mount_uid == uid
+    }
+
+    pub fn new(name: String, fs: FileSystem<D>, mount_mode: u16, mount_uid: u32, mount_gid: u32) -> FileScheme<D> {
+        FileScheme {
+            name: name,
+            fs: RefCell::new(fs),
+            next_id: AtomicUsize::new(1),
+            files: Mutex::new(BTreeMap::new()),
+            fmaps: Mutex::new(Fmaps::default()),
+            mount_mode: mount_mode,
+            mount_uid: mount_uid,
+            mount_gid: mount_gid
+        }
     }
 }
 
