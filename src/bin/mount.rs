@@ -8,7 +8,7 @@ extern crate syscall;
 
 extern crate redox_fatfs;
 
-extern crate uuid;
+//extern crate uuid;
 
 use std::env;
 use std::fs::File;
