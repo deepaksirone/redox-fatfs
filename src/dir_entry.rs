@@ -588,7 +588,8 @@ impl File {
                 }
             }
             let end_len = min(min((fs.bytes_per_cluster() - cluster_offset) as usize, buf.len() - read), read_size - read);
-            let r = fs.read_at(fs.cluster_offset(current_cluster) + cluster_offset, &mut buf[start..start + end_len])?;
+            let offset = fs.cluster_offset(current_cluster) + cluster_offset;
+            let r = fs.read_at(offset, &mut buf[start..start + end_len])?;
             read += r;
             start += r;
             cluster_offset += r as u64;
@@ -633,7 +634,8 @@ impl File {
             let end_len = min((fs.bytes_per_cluster() - cluster_offset) as usize, buf.len() - written);
             println!("Cluster = {:?}, Cluster Offset = {:?}, Cluster Size = {:?}, start = {:?}, end = {:?}",
                      current_cluster, cluster_offset, fs.bytes_per_cluster(), start, start + end_len);
-            let w = fs.write_to(fs.cluster_offset(current_cluster) + cluster_offset, &buf[start..start + end_len])?;
+            let offset = fs.cluster_offset(current_cluster) + cluster_offset;
+            let w = fs.write_to(offset, &buf[start..start + end_len])?;
 
             written += w;
             start += w;
@@ -1089,7 +1091,8 @@ impl<'a, D: Read + Write + Seek> DirIter <'a, D>{
                 return Ok((self.offset, self.current_cluster, None))
             }
 
-            let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+            let offset = self.fs.cluster_offset(self.current_cluster) + self.offset;
+            let mut dentry = get_dir_entry_raw(self.fs, offset)?;
             match dentry {
                 DirEntryRaw::Short(s) => {
                     self.offset = self.offset + DIR_ENTRY_LEN;
@@ -1119,7 +1122,8 @@ impl<'a, D: Read + Write + Seek> DirIter <'a, D>{
                             break;
                         }
 
-                        let mut dentry = get_dir_entry_raw(self.fs, self.fs.cluster_offset(self.current_cluster) + self.offset)?;
+                        let offset = self.fs.cluster_offset(self.current_cluster) + self.offset;
+                        let mut dentry = get_dir_entry_raw(self.fs, offset)?;
                         match dentry {
                             DirEntryRaw::Short(_) => {
                                 lfn_entries.push(dentry);

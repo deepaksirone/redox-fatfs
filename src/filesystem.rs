@@ -293,7 +293,8 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
     pub fn zero_cluster(&mut self, cluster: Cluster) -> Result<()> {
         let zeroes = vec![0; self.bytes_per_cluster() as usize];
-        self.write_to(self.cluster_offset(cluster), zeroes.as_slice())?;
+        let offset = self.cluster_offset(cluster);
+        self.write_to(offset, zeroes.as_slice())?;
         Ok(())
     }
 
