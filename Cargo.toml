@@ -12,7 +12,7 @@ byteorder = "1"
 log = "0.4.6"
 bitflags = "1.1.0"
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(not(target_os = "redox"))'.dependencies]
 fuse = "0.3"
 libc = "0.2"
 time = "0.1"
