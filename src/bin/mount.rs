@@ -144,26 +144,26 @@ fn daemon(path: &str, mountpoint: &str, mut write: File, uid: u32, gid: u32, mod
                         true
                     };*/
                     match mount(filesystem, &mountpoint, || {
-                        println!("redoxfs: mounted filesystem on {} to {}", path, mountpoint);
+                        println!("redox-fatfs: mounted filesystem on {} to {}", path, mountpoint);
                         let _ = write.write(&[0]);
                     }, mode, uid, gid) {
                         Ok(()) => {
                             process::exit(0);
                         },
                         Err(err) => {
-                            println!("redoxfs: failed to mount {} to {}: {}", path, mountpoint, err);
+                            println!("redox-fatfs: failed to mount {} to {}: {}", path, mountpoint, err);
                         }
                     }
 
                 },
-                Err(err) => println!("redoxfs: failed to open filesystem {}: {}", path, err)
+                Err(err) => println!("redox-fatfs: failed to open filesystem {}: {}", path, err)
             },
-            Err(err) => println!("redoxfs: failed to open image {}: {}", path, err)
+            Err(err) => println!("redox-fatfs: failed to open image {}: {}", path, err)
     }
 
 
 
-     println!("redoxfs: not able to mount path {}", path);
+     println!("redox-fatfs: not able to mount path {}", path);
 
 
     let _ = write.write(&[1]);
@@ -218,24 +218,24 @@ fn main() {
                     Some(u) => match u.parse::<u32>() {
                         Ok(i) => i,
                         Err(e) =>  {
-                            println!("redoxfs: invalid uid '{}': {}", u, e);
+                            println!("redox-fatfs: invalid uid '{}': {}", u, e);
                             usage();
                             process::exit(1);
                         }
                     },
                     None => {
-                        println!("redoxfs: no uid provided, defaulting to 0");
+                        println!("redox-fatfs: no uid provided, defaulting to 0");
                         0
                     }
                 };
                 uid
             } else {
-                println!("redoxfs: no uid provided, defaulting to 0");
+                println!("redox-fatfs: no uid provided, defaulting to 0");
                 0
             }
         },
         None => {
-            println!("redoxfs: no uid provided, defaulting to 0");
+            println!("redox-fatfs: no uid provided, defaulting to 0");
             0
         }
     };
@@ -247,24 +247,24 @@ fn main() {
                     Some(u) => match u.parse::<u32>() {
                         Ok(i) => i,
                         Err(e) =>  {
-                            println!("redoxfs: invalid gid '{}': {}", u, e);
+                            println!("redox-fatfs: invalid gid '{}': {}", u, e);
                             usage();
                             process::exit(1);
                         }
                     },
                     None => {
-                        println!("redoxfs: no gid provided, defaulting to 0");
+                        println!("redox-fatfs: no gid provided, defaulting to 0");
                         0
                     }
                 };
                 uid
             } else {
-                println!("redoxfs: no gid provided, defaulting to 0");
+                println!("redox-fatfs: no gid provided, defaulting to 0");
                 0
             }
         },
         None => {
-            println!("redoxfs: no gid provided, defaulting to 0");
+            println!("redox-fatfs: no gid provided, defaulting to 0");
             0
         }
     };
@@ -276,24 +276,24 @@ fn main() {
                     Some(u) => match u.parse::<u16>() {
                         Ok(i) => i,
                         Err(e) =>  {
-                            println!("redoxfs: invalid gid '{}': {}", u, e);
+                            println!("redox-fatfs: invalid gid '{}': {}", u, e);
                             usage();
                             process::exit(1);
                         }
                     },
                     None => {
-                        println!("redoxfs: no mode provided, defaulting to 0o777");
+                        println!("redoxfatfs: no mode provided, defaulting to 0o777");
                         0o777
                     }
                 };
                 uid
             } else {
-                println!("redoxfs: no gid provided, defaulting to 0o777");
+                println!("redox-fatfs: no gid provided, defaulting to 0o777");
                 0o777
             }
         },
         None => {
-            println!("redoxfs: no gid provided, defaulting to 0o777");
+            println!("redox-fatfs: no gid provided, defaulting to 0o777");
             0o777
         }
     };
@@ -301,6 +301,7 @@ fn main() {
 
     let mut paths = vec![];
     disk_paths(&mut paths);
+    let mut exit_code = 0;
 
     for path in paths {
         let mut pipes = [0; 2];
@@ -321,12 +322,16 @@ fn main() {
                 let mut res = [0];
                 read.read(&mut res).unwrap();
 
-                process::exit(res[0] as i32);
+                if res[0] > 0 {
+                    exit_code = res[0] as i32;
+                }
             } else {
-                panic!("redoxfs: failed to fork");
+                panic!("redox-fatfs: failed to fork");
             }
         } else {
-            panic!("redoxfs: failed to create pipe");
+            panic!("redox-fatfs: failed to create pipe");
         }
     }
+
+    process::exit(exit_code);
 }
