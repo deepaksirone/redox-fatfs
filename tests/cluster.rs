@@ -1,18 +1,18 @@
+#![allow(dead_code)]
+#![allow(unused_must_use)]
 extern crate redox_fatfs;
 
-use std::fs::{File, OpenOptions};
-use std::io::prelude::*;
-use std::io::SeekFrom;
+use std::fs::OpenOptions;
 use std::str;
 
 use redox_fatfs::*;
 
 #[test]
 fn print_fat32() {
-    let mut f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
+    let f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let root_clus = Cluster::new(2);
-    let max_cluster = fs.max_cluster_number();
+    let _max_cluster = fs.max_cluster_number();
     println!("Root Cluster = {:?}", fs.clusters(root_clus));
     let mut buf = [0; 32];
     fs.read_cluster(Cluster::new(14), &mut buf);
@@ -76,7 +76,7 @@ fn print_fat32() {
     let s = "//this/is/a/path.txt".to_string();
     let t : Vec<&str> = s.split('/').collect();
     println!("Split string : {:?}", t);
-    let mut root_d = fs.root_dir();
+    let root_d = fs.root_dir();
     let r = root_d.find_entry("heLlo.txt", None, None, &mut fs);
     println!("Trying to find heLlo.txt : {:?}", r);
 
@@ -89,7 +89,7 @@ fn print_fat32() {
 }
 
 fn print_fat12() {
-    let mut f = OpenOptions::new().read(true).write(true).open("images/fat12.img").expect("Failed to open fat12.img");
+    let f = OpenOptions::new().read(true).write(true).open("images/fat12.img").expect("Failed to open fat12.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let root_sec = fs.bpb.rsvd_sec_cnt as u64 + (fs.bpb.num_fats as u64 * fs.bpb.fat_size_16 as u64);
     let root_clus = Cluster::new(root_sec / fs.bpb.sectors_per_cluster as u64);
@@ -156,7 +156,7 @@ fn print_fat12() {
 
 
 fn print_fat16() {
-    let mut f = OpenOptions::new().read(true).write(true).open("images/fat16.img").expect("Failed to open fat16.img");
+    let f = OpenOptions::new().read(true).write(true).open("images/fat16.img").expect("Failed to open fat16.img");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
     let max_cluster = fs.max_cluster_number();
     let root_sec = fs.bpb.rsvd_sec_cnt as u64 + (fs.bpb.num_fats as u64 * fs.bpb.fat_size_16 as u64);

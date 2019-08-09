@@ -59,6 +59,7 @@ fn pipe(pipes: &mut [i32; 2]) -> isize {
     unsafe { libc::pipe(pipes.as_mut_ptr()) as isize }
 }
 
+#[allow(dead_code)]
 #[cfg(not(target_os = "redox"))]
 fn capability_mode() {
     ()

@@ -1,17 +1,16 @@
 use std::cmp::{min, max};
-use std::time::{SystemTime, UNIX_EPOCH};
+//use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Read, Write, Seek};
-use std::convert::From;
 
 use syscall::data::{Map, Stat, TimeSpec};
-use syscall::error::{Error, Result, EBADF, EBUSY, EINVAL, EISDIR, EPERM};
-use syscall::flag::{O_ACCMODE, O_RDONLY, O_WRONLY, O_RDWR, F_GETFL, F_SETFL, MODE_PERM, PROT_READ, PROT_WRITE, SEEK_SET, SEEK_CUR, SEEK_END};
+use syscall::error::{Error, Result, EBADF, EINVAL, EISDIR, EPERM};
+use syscall::flag::{O_ACCMODE, O_RDONLY, O_WRONLY, O_RDWR, F_GETFL, F_SETFL, SEEK_SET, SEEK_CUR, SEEK_END};
 
 use filesystem::FileSystem;
 use dir_entry::{Dir, File, DirEntry};
 use super::result;
 
-use super::scheme::{Fmaps, FmapKey, FmapValue};
+use super::scheme::{Fmaps};
 
 
 pub trait Resource<D: Read + Write + Seek> {
@@ -89,7 +88,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         ))
     }
 
-    fn read(&mut self, buf: &mut [u8], fs: &mut FileSystem<D>) -> Result<usize> {
+    fn read(&mut self, buf: &mut [u8], _fs: &mut FileSystem<D>) -> Result<usize> {
         let data = self.data.as_ref().ok_or(Error::new(EISDIR))?;
         let mut i = 0;
         while i < buf.len() && self.seek < data.len() {
@@ -124,11 +123,11 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         Err(Error::new(EBADF))
     }
 
-    fn fchmod(&mut self, mode: u16, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn fchmod(&mut self, _mode: u16, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0) //No notion of permissions in FAT
     }
 
-    fn fchown(&mut self, uid: u32, gid: u32, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn fchown(&mut self, _uid: u32, _gid: u32, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0)
     }
 
@@ -177,7 +176,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         Err(Error::new(EBADF))
     }
 
-    fn utimens(&mut self, _times: &[TimeSpec], uid: u32, _fs: &mut FileSystem<D>) -> Result<usize> {
+    fn utimens(&mut self, _times: &[TimeSpec], _uid: u32, _fs: &mut FileSystem<D>) -> Result<usize> {
         Err(Error::new(EBADF))
     }
 
@@ -232,7 +231,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         }
     }
 
-    fn dup(&self) -> Result<Box<Resource<D>>> {
+    fn dup(&self) -> Result<Box<dyn Resource<D>>> {
         Ok(Box::new(
             FileResource {
                 file: self.file.clone(),
@@ -267,7 +266,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         }
     }
 
-    fn seek(&mut self, offset: usize, whence: usize, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn seek(&mut self, offset: usize, whence: usize, _fs: &mut FileSystem<D>) -> Result<usize> {
         let size = self.file.size();
 
         self.seek = match whence {
@@ -280,19 +279,19 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         Ok(self.seek as usize)
     }
 
-    fn fmap(&mut self, map: &Map, maps: &mut Fmaps, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn fmap(&mut self, _map: &Map, _maps: &mut Fmaps, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0)
     }
 
-    fn funmap(&mut self, maps: &mut Fmaps, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn funmap(&mut self, _maps: &mut Fmaps, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0)
     }
 
-    fn fchmod(&mut self, mode: u16, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn fchmod(&mut self, _mode: u16, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0)
     }
 
-    fn fchown(&mut self, uid: u32, gid: u32, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn fchown(&mut self, _uid: u32, _gid: u32, _fs: &mut FileSystem<D>) -> Result<usize> {
         Ok(0)
     }
 
@@ -319,7 +318,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         Ok(i)
     }
 
-    fn stat(&self, stat: &mut Stat, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn stat(&self, stat: &mut Stat, _fs: &mut FileSystem<D>) -> Result<usize> {
         //let node = fs.node(self.block)?;
 
         *stat = Stat {
@@ -341,7 +340,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         Ok(0)
     }
 
-    fn sync(&mut self, maps: &mut Fmaps, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn sync(&mut self, _maps: &mut Fmaps, _fs: &mut FileSystem<D>) -> Result<usize> {
         //self.sync_fmap(maps, fs)?;
 
         Ok(0)
@@ -356,7 +355,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         }
     }
 
-    fn utimens(&mut self, times: &[TimeSpec], uid: u32, fs: &mut FileSystem<D>) -> Result<usize> {
+    fn utimens(&mut self, _times: &[TimeSpec], uid: u32, _fs: &mut FileSystem<D>) -> Result<usize> {
 
 
         if uid == self.uid.unwrap_or(0) || self.uid.unwrap_or(0) == 0 {

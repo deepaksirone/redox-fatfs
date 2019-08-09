@@ -1,12 +1,12 @@
-use std::ops::{Deref, DerefMut};
-use std::io::{Read, Write, Seek, SeekFrom};
+
+use std::io::{Read, Seek, SeekFrom};
 use std::default::Default;
 use std::fmt;
 use super::Result;
 
 use byteorder::{ReadBytesExt, LittleEndian};
 //use Disk;
-use BLOCK_SIZE;
+
 
 /// The BIOS Parameter Block elements common to all types of FAT volumes
 #[allow(dead_code)]
@@ -181,7 +181,7 @@ impl BiosParameterBlock {
         disk.read_exact(&mut bpb32.volume_label)?;
         disk.read_exact(&mut bpb32.file_sys_type)?;
         //disk.read_exact(&mut bpb32.code)?;
-        disk.seek(SeekFrom::Current(420));
+        disk.seek(SeekFrom::Current(420))?;
         disk.read_exact(&mut bpb.sig)?;
 
         let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);

@@ -2,20 +2,19 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::result::Result as StdResult;
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+//use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{Read, Write, Seek};
 
 use syscall::data::{Map, Stat, StatVfs, TimeSpec};
-use syscall::error::{Error, Result, EACCES, EEXIST, EISDIR, ENOTDIR, ENOTEMPTY, EPERM, ENOENT, EBADF, ELOOP, EINVAL};
-use syscall::flag::{O_APPEND, O_CREAT, O_DIRECTORY, O_STAT, O_EXCL, O_TRUNC, O_ACCMODE, O_RDONLY, O_WRONLY, O_RDWR, MODE_PERM, O_SYMLINK, O_NOFOLLOW};
+use syscall::error::{Error, Result, EACCES, EEXIST, EISDIR, ENOTDIR, EPERM, ENOENT, EBADF, EINVAL};
+use syscall::flag::{O_APPEND, O_CREAT, O_DIRECTORY, O_EXCL, O_TRUNC, O_ACCMODE, O_RDONLY, O_WRONLY, O_RDWR, O_SYMLINK};
 use syscall::scheme::Scheme;
 
 
 use filesystem::FileSystem;
-use dir_entry::{DirEntry, File, Dir};
+use dir_entry::Dir;
 use table::get_free_count;
 
 use super::result::from;
@@ -39,12 +38,6 @@ pub struct FmapValue {
     pub refcount: usize
 }
 
-const MODE_TYPE: u16 = 0xF000;
-const MODE_FILE: u16 = 0x8000;
-const MODE_DIR: u16 = 0x4000;
-const MODE_SYMLINK: u16 = 0xA000;
-
-const MODE_EXEC: u16 = 0o1;
 const MODE_WRITE: u16 = 0o2;
 const MODE_READ: u16 = 0o4;
 
@@ -114,7 +107,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
         let mut fs = self.fs.borrow_mut();
         let dentry = Dir::get_entry_abs(path, &mut fs).ok();
         //let node_opt = self.path_nodes(&mut fs, path, uid, gid, &mut nodes)?;
-        let resource: Box<Resource<D>> = match dentry {
+        let resource: Box<dyn Resource<D>> = match dentry {
             Some(e) => if flags & (O_CREAT | O_EXCL) == O_CREAT | O_EXCL {
                 return Err(Error::new(EEXIST));
             } else if e.is_dir() {
@@ -209,13 +202,10 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
                 }
 
                 let dir = flags & O_DIRECTORY == O_DIRECTORY;
-                let mode_type = if dir {
-                    MODE_DIR
-                } else if flags & O_SYMLINK == O_SYMLINK {
+
+                if flags & O_SYMLINK == O_SYMLINK {
                     return Err(Error::new(EPERM))
-                } else {
-                    MODE_FILE
-                };
+                }
 
                         /*let ctime = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
                         let mut node = fs.create_node(mode_type | (flags as u16 & MODE_PERM), &last_part, parent.0, ctime.as_secs(), ctime.subsec_nanos())?;
@@ -251,7 +241,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
         Ok(id)
     }
 
-    fn chmod(&self, url: &[u8], mode: u16, uid: u32, gid: u32) -> Result<usize> {
+    fn chmod(&self, _url: &[u8], _mode: u16, _uid: u32, _gid: u32) -> Result<usize> {
         Ok(0)
     }
 
@@ -271,7 +261,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
             if child.is_dir() {
                 let root_dir = fs.root_dir();
-                from(root_dir.remove(path, &mut fs).map(|x| 0 as usize))
+                from(root_dir.remove(path, &mut fs).map(|_x| 0 as usize))
             } else {
                     Err(Error::new(ENOTDIR))
             }
@@ -297,7 +287,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
                 if ! child.is_dir() {
                     let root_dir = fs.root_dir();
-                    from(root_dir.remove(path, &mut fs).map(|r| 0 as usize))
+                    from(root_dir.remove(path, &mut fs).map(|_r| 0 as usize))
                 } else {
                     Err(Error::new(EISDIR))
                 }
@@ -363,11 +353,11 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
         }
     }
 
-    fn fchmod(&self, id: usize, mode: u16) -> Result<usize> {
+    fn fchmod(&self, _id: usize, _mode: u16) -> Result<usize> {
         Ok(0)
     }
 
-    fn fchown(&self, id: usize, uid: u32, gid: u32) -> Result<usize> {
+    fn fchown(&self, _id: usize, _uid: u32, _gid: u32) -> Result<usize> {
         Ok(0)
     }
 
@@ -406,7 +396,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
         }
     }
 
-    fn frename(&self, id: usize, url: &[u8], uid: u32, gid: u32) -> Result<usize> {
+    fn frename(&self, id: usize, url: &[u8], uid: u32, _gid: u32) -> Result<usize> {
         let path = str::from_utf8(url).unwrap_or("").trim_matches('/');
 
         // println!("Frename {}, {} from {}, {}", id, path, uid, gid);
@@ -436,7 +426,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
                 // println!("orig not owned by caller {}", uid);
                 return Err(Error::new(EACCES));
             }
-            from(Dir::rename(&mut orig, path, &mut fs).map(|x| 0 as usize))?;
+            from(Dir::rename(&mut orig, path, &mut fs).map(|_x| 0 as usize))?;
             file.set_dirent(orig.clone())
             /*
             let mut nodes = Vec::new();

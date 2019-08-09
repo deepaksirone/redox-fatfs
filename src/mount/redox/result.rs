@@ -1,6 +1,6 @@
 use Result;
-use std::io::{Error, ErrorKind};
-use std::convert::From;
+use std::io::ErrorKind;
+
 
 
 pub fn from<T>(res: Result<T>) -> syscall::Result<T> {

@@ -1,17 +1,16 @@
 use super::Result;
 
 use std::io::{Read, Write, Seek, SeekFrom, Error, ErrorKind};
-use std::path::Path;
 use std::default::Default;
 use std::iter::Iterator;
 use std::cell::{RefCell};
-use std::cmp::{Eq, PartialEq, Ord, PartialOrd, Ordering};
+use std::cmp::{Eq, PartialEq, PartialOrd, Ordering};
 
 use BiosParameterBlock;
 //use disk::Disk;
 use bpb::FATType;
 use table::{FatEntry, get_entry, get_entry_raw, set_entry, RESERVED_CLUSTERS};
-use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use dir_entry::Dir;
 
 #[derive(Copy, Clone, Debug)]
@@ -60,9 +59,6 @@ impl<'a, D: Read + Write + Seek> Iterator for ClusterIter<'a, D> {
     }
 }
 
-struct Sector {
-    number: u64
-}
 
 /// An in-memory copy of FsInfo Struct for FAT32
 /// Flushed out to disk on unmounting the volume
@@ -260,7 +256,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     }
 
     pub fn num_clusters_chain(&mut self, start_cluster: Cluster) -> u64 {
-        self.cluster_iter(start_cluster).fold(0, |sz, cluster| sz + 1)
+        self.cluster_iter(start_cluster).fold(0, |sz, _cluster| sz + 1)
     }
 
     pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
@@ -330,7 +326,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
     pub fn root_dir_offset(&self) -> u64 {
         match self.bpb.fat_type {
             FATType::FAT32(s) => {
-                let bytes_per_sec = self.bytes_per_sec();
+                //let bytes_per_sec = self.bytes_per_sec();
                 let first_sec_cluster = (s.root_cluster as u64 - 2) * self.sectors_per_cluster() + self.first_data_sec;
                 first_sec_cluster * self.bytes_per_sec()
             },
@@ -375,7 +371,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
     // Returns zero when the cluster offset makes no sense
     pub fn cluster_offset(&self, cluster: Cluster) -> u64 {
-        let bytes_per_sec = self.bytes_per_sec();
+        //let bytes_per_sec = self.bytes_per_sec();
         if cluster.cluster_number >= 2 {
             let first_sec_cluster = (cluster.cluster_number - 2) * self.sectors_per_cluster() + self.first_data_sec;
             first_sec_cluster * self.bytes_per_sec()
@@ -508,7 +504,9 @@ impl<D: Read + Write + Seek> FileSystem<D> {
 
 impl<D: Read + Write + Seek> Drop for FileSystem<D> {
     fn drop(&mut self) {
-        self.unmount();
+        match self.unmount() {
+            _ => {}
+        }
     }
 }
 
@@ -526,14 +524,6 @@ impl Default for Cluster {
         Cluster {
             cluster_number: 0,
             parent_cluster: 0
-        }
-    }
-}
-
-impl Default for Sector {
-    fn default() -> Self {
-        Sector {
-            number: 0
         }
     }
 }
