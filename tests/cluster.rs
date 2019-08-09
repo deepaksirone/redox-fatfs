@@ -7,7 +7,7 @@ use std::str;
 
 use redox_fatfs::*;
 
-#[test]
+
 fn print_fat32() {
     let f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -185,7 +185,7 @@ fn print_fat16() {
     }
 }
 
-
+#[test]
 fn short_names()
 {
     let s = ".";
@@ -197,6 +197,49 @@ fn short_names()
     println!("IStrue : {:?}", s == ".");
     println!("Period Stripped: {:?}", s1.trim_start_matches("."));
     println!("Reverse Split path :{:?}", rsplit_path(p));
+    let name = ".bashrc.swp";
+    let mut sng = ShortNameGen::new(name);
+    let i1 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 1 iter : {:?}", str::from_utf8(&i1));
+    sng.add_name(&i1);
+
+    let i2 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 2 iter : {:?}", str::from_utf8(&i2));
+    sng.add_name(&i2);
+
+    let i3 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&i3));
+    sng.add_name(&i3);
+
+    let i4 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 4 iter : {:?}", str::from_utf8(&i4));
+    sng.add_name(&i4);
+
+    let i5 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 5 iter : {:?}", str::from_utf8(&i5));
+    sng.add_name(&i5);
+
+    let i6 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&i6));
+    sng.add_name(&i6);
+
+    let i7 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&i7));
+    sng.add_name(&i7);
+
+    let _i8 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&_i8));
+    sng.add_name(&_i8);
+
+    let i9 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&i9));
+    sng.add_name(&i9);
+
+    sng.next_iteration();
+    let i10 = sng.generate().expect("Failed to generate");
+    println!(".bashrc.swp 3 iter : {:?}", str::from_utf8(&i10));
+    sng.add_name(&i10);
+
 }
 
 fn rsplit_path(path: &str) -> (&str, Option<&str>) {

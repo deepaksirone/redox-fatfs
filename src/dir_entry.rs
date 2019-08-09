@@ -1633,7 +1633,7 @@ impl ShortNameGen {
 
     // Update state of generator
     // Needed in case LFNs are not present
-    fn add_name(&mut self, name: &[u8; 11]) {
+    pub fn add_name(&mut self, name: &[u8; 11]) {
         // check for exact match collision
         if name == &self.name {
             self.exact_match = true;
@@ -1669,7 +1669,7 @@ impl ShortNameGen {
 
     }
 
-    fn generate(&self) -> Result<[u8; 11]> {
+    pub fn generate(&self) -> Result<[u8; 11]> {
         if self.is_dot || self.is_dotdot {
             return Ok(self.name)
         }
@@ -1695,7 +1695,7 @@ impl ShortNameGen {
         Err(Error::new(ErrorKind::AlreadyExists, "short name already exists"))
     }
 
-    fn next_iteration(&mut self) {
+    pub fn next_iteration(&mut self) {
         // Try different checksum in next iteration
         self.checksum = (num::Wrapping(self.checksum) + num::Wrapping(1)).0;
         // Zero bitmaps
