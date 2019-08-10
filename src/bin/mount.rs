@@ -13,7 +13,7 @@ extern crate redox_fatfs;
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -318,8 +318,8 @@ fn main() {
     for path in paths {
         let mut pipes = [0; 2];
         if pipe(&mut pipes) == 0 {
-            let mut read = unsafe { File::from_raw_fd(pipes[0]) };
-            let write = unsafe { File::from_raw_fd(pipes[1]) };
+            let mut read = unsafe { File::from_raw_fd(pipes[0] as RawFd) };
+            let write = unsafe { File::from_raw_fd(pipes[1] as RawFd) };
 
             let pid = fork();
             if pid == 0 {

@@ -197,7 +197,7 @@ impl Dir {
         match r {
             DirEntryOrShortName::ShortName(short_name) => {
                 valid_long_name(name)?;
-                self.create_dir_entries(name, &short_name, None,
+                self.create_dir_entries(name.trim(), &short_name, None,
                                               FileAttributes::ARCHIVE, fs).map(|e| e.to_file())
             },
             DirEntryOrShortName::DirEntry(e) => Ok(e.to_file())
@@ -236,7 +236,7 @@ impl Dir {
                 dot_entry.flush(fs.cluster_offset(f_cluster) + offset, fs)?;
 
 
-                self.create_dir_entries(name, &short_name, Some(short_entry),
+                self.create_dir_entries(name.trim(), &short_name, Some(short_entry),
                                         FileAttributes::DIRECTORY, fs).map(|e| e.to_dir())
             },
             DirEntryOrShortName::DirEntry(e) => Ok(e.to_dir())
