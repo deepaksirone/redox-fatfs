@@ -11,7 +11,8 @@ extern crate redox_fatfs;
 //extern crate uuid;
 
 use std::env;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::io::{Read, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::process;
@@ -135,11 +136,11 @@ fn disk_paths(paths: &mut Vec<String>) {
     }
 }
 
-fn daemon(path: &str, mountpoint: &str, mut write: File, uid: u32, gid: u32, mode: u16) -> ! {
+fn daemon(path: &String, mountpoint: &str, mut write: File, uid: u32, gid: u32, mode: u16) -> ! {
     setsig();
 
     println!("redox-fatfs: opening {}", path);
-    match std::fs::OpenOptions::new().read(true).write(true).open(path) {
+    match OpenOptions::new().read(true).write(true).open(path) {
             Ok(disk) => match redox_fatfs::FileSystem::from_offset(0, disk) {
                 Ok(filesystem) => {
                     println!("redox-fatfs: opened filesystem on {}", path);
