@@ -152,8 +152,8 @@ impl BiosParameterBlock {
 
         let mut bpb  = BiosParameterBlock::default();
         println!("Over Here!");
-        disk.read_exact(&mut bpb.jmp_boot)?;
-        disk.read_exact(&mut bpb.oem_name)?;
+        disk.read(&mut bpb.jmp_boot)?;
+        disk.read(&mut bpb.oem_name)?;
         println!("Over Here! 1");
         bpb.bytes_per_sector = disk.read_u16::<LittleEndian>()?;
         bpb.sectors_per_cluster = disk.read_u8()?;
@@ -175,16 +175,16 @@ impl BiosParameterBlock {
         bpb32.root_cluster = disk.read_u32::<LittleEndian>()?;
         bpb32.fs_info = disk.read_u16::<LittleEndian>()?;
         bpb32.bk_boot_sec = disk.read_u16::<LittleEndian>()?;
-        disk.read_exact(&mut bpb32.reserved)?;
+        disk.read(&mut bpb32.reserved)?;
         bpb32.drv_num = disk.read_u8()?;
         bpb32.reserved1 = disk.read_u8()?;
         bpb32.boot_sig = disk.read_u8()?;
         bpb32.vol_id = disk.read_u32::<LittleEndian>()?;
-        disk.read_exact(&mut bpb32.volume_label)?;
-        disk.read_exact(&mut bpb32.file_sys_type)?;
+        disk.read(&mut bpb32.volume_label)?;
+        disk.read(&mut bpb32.file_sys_type)?;
         //disk.read_exact(&mut bpb32.code)?;
         disk.seek(SeekFrom::Current(420))?;
-        disk.read_exact(&mut bpb.sig)?;
+        disk.read(&mut bpb.sig)?;
 
         let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);
         let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
