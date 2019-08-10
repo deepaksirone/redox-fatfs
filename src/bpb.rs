@@ -151,8 +151,10 @@ impl BiosParameterBlock {
     pub fn populate<D: Read+Seek>(disk: &mut D) -> Result<BiosParameterBlock> {
 
         let mut bpb  = BiosParameterBlock::default();
+        println!("Over Here!");
         disk.read_exact(&mut bpb.jmp_boot)?;
         disk.read_exact(&mut bpb.oem_name)?;
+        println!("Over Here! 1");
         bpb.bytes_per_sector = disk.read_u16::<LittleEndian>()?;
         bpb.sectors_per_cluster = disk.read_u8()?;
         bpb.rsvd_sec_cnt = disk.read_u16::<LittleEndian>()?;
