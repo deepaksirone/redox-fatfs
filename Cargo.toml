@@ -4,6 +4,15 @@ version = "0.1.0"
 license-file = "LICENSE"
 authors = ["Deepak Sirone <deepaksirone94@gmail.com>"]
 
+[lib]
+name = "redox_fatfs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "redox-fatfs"
+path = "src/bin/mount.rs"
+doc = false
+
 [dependencies]
 spin = "0.4"
 redox_syscall = "0.1"
@@ -16,11 +25,6 @@ bitflags = "1.1.0"
 fuse = "0.3"
 libc = "0.2"
 time = "0.1"
-
-[[bin]]
-name = "redox-fatfs"
-path = "src/bin/mount.rs"
-doc = false
 
 [features]
 default = ["secure"]

@@ -1,6 +1,7 @@
 use super::Result;
+use BLOCK_SIZE;
 
-use std::io::{Read, Write, Seek, SeekFrom, Error, ErrorKind};
+use std::io::{Read, Write, Seek, SeekFrom, Error, ErrorKind, Cursor};
 use std::default::Default;
 use std::iter::Iterator;
 use std::cell::{RefCell};
@@ -85,6 +86,7 @@ impl FsInfo {
     const LEAD_SIG: u32 = 0x41615252;
     const STRUC_SIG: u32 = 0x61417272;
     const TRAIL_SIG: u32 = 0xAA550000;
+    const FS_INFO_SIZE: u64 = 512;
 
     fn is_valid(&self) -> bool {
         self.lead_sig == Self::LEAD_SIG && self.struc_sig == Self::STRUC_SIG &&
@@ -92,15 +94,19 @@ impl FsInfo {
     }
 
     pub fn populate<D: Read + Seek>(disk: &mut D, offset: u64) -> Result<Self> {
-
+        let block_vec = get_block_buffer(offset, Self::FS_INFO_SIZE);
+        let mut cursor = Cursor::new(block_vec);
         let mut fsinfo = FsInfo::default();
-        fsinfo.lead_sig = disk.read_u32::<LittleEndian>()?;
-        disk.seek(SeekFrom::Current(480))?;
-        fsinfo.struc_sig = disk.read_u32::<LittleEndian>()?;
-        fsinfo.free_count = disk.read_u32::<LittleEndian>()?;
-        fsinfo.next_free = disk.read_u32::<LittleEndian>()?;
-        disk.seek(SeekFrom::Current(12))?;
-        fsinfo.trail_sig = disk.read_u32::<LittleEndian>()?;
+        let read = disk.read(cursor.get_mut())?;
+        println!("Read {:?} bytes into block vec", read);
+
+        fsinfo.lead_sig = cursor.read_u32::<LittleEndian>()?;
+        cursor.seek(SeekFrom::Current(480))?;
+        fsinfo.struc_sig = cursor.read_u32::<LittleEndian>()?;
+        fsinfo.free_count = cursor.read_u32::<LittleEndian>()?;
+        fsinfo.next_free = cursor.read_u32::<LittleEndian>()?;
+        cursor.seek(SeekFrom::Current(12))?;
+        fsinfo.trail_sig = cursor.read_u32::<LittleEndian>()?;
         fsinfo.dirty = false;
         fsinfo.offset = Some(offset);
 
@@ -271,6 +277,11 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             Err(e) => Err(e)
         }
     }
+
+    /*
+    pub fn seek_to_block(&mut self, block_number: u64) -> Result<usize> {
+        let raw_block_number = self.partition_offset + block_number
+    }*/
 
     pub fn write_to(&mut self, offset: u64, buf: &[u8]) -> Result<usize> {
         self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
@@ -526,4 +537,11 @@ impl Default for Cluster {
             parent_cluster: 0
         }
     }
+}
+
+pub fn get_block_buffer(byte_offset: u64, read_size: u64) -> Vec<u8> {
+    let block_offset = byte_offset % BLOCK_SIZE;
+    let tot_blocks = (block_offset + read_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    vec![0; tot_blocks as usize * BLOCK_SIZE as usize]
+
 }

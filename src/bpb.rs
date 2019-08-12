@@ -1,9 +1,9 @@
-
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Cursor};
 use std::default::Default;
 use std::fmt;
 use super::Result;
 
+use BLOCK_SIZE;
 use byteorder::{ReadBytesExt, LittleEndian};
 //use Disk;
 
@@ -149,42 +149,43 @@ pub struct BiosParameterBlockFAT32 {
 
 impl BiosParameterBlock {
     pub fn populate<D: Read+Seek>(disk: &mut D) -> Result<BiosParameterBlock> {
-
+        let mut cursor = Cursor::new(vec![0u8; BLOCK_SIZE as usize]);
         let mut bpb  = BiosParameterBlock::default();
-        println!("Over Here!");
-        disk.read(&mut bpb.jmp_boot)?;
-        disk.read(&mut bpb.oem_name)?;
+        let read_amount = disk.read(cursor.get_mut())?;
+        println!("Read into cursor!: {:?}", read_amount);
+        cursor.read_exact(&mut bpb.jmp_boot)?;
+        cursor.read_exact(&mut bpb.oem_name)?;
         println!("Over Here! 1");
-        bpb.bytes_per_sector = disk.read_u16::<LittleEndian>()?;
-        bpb.sectors_per_cluster = disk.read_u8()?;
-        bpb.rsvd_sec_cnt = disk.read_u16::<LittleEndian>()?;
-        bpb.num_fats = disk.read_u8()?;
-        bpb.root_entries_cnt = disk.read_u16::<LittleEndian>()?;
-        bpb.total_sectors_16 = disk.read_u16::<LittleEndian>()?;
-        bpb.media = disk.read_u8()?;
-        bpb.fat_size_16 = disk.read_u16::<LittleEndian>()?;
-        bpb.sectors_per_track = disk.read_u16::<LittleEndian>()?;
-        bpb.number_of_heads = disk.read_u16::<LittleEndian>()?;
-        bpb.hidden_sectors = disk.read_u32::<LittleEndian>()?;
-        bpb.total_sectors_32 = disk.read_u32::<LittleEndian>()?;
+        bpb.bytes_per_sector = cursor.read_u16::<LittleEndian>()?;
+        bpb.sectors_per_cluster = cursor.read_u8()?;
+        bpb.rsvd_sec_cnt = cursor.read_u16::<LittleEndian>()?;
+        bpb.num_fats = cursor.read_u8()?;
+        bpb.root_entries_cnt = cursor.read_u16::<LittleEndian>()?;
+        bpb.total_sectors_16 = cursor.read_u16::<LittleEndian>()?;
+        bpb.media = cursor.read_u8()?;
+        bpb.fat_size_16 = cursor.read_u16::<LittleEndian>()?;
+        bpb.sectors_per_track = cursor.read_u16::<LittleEndian>()?;
+        bpb.number_of_heads = cursor.read_u16::<LittleEndian>()?;
+        bpb.hidden_sectors = cursor.read_u32::<LittleEndian>()?;
+        bpb.total_sectors_32 = cursor.read_u32::<LittleEndian>()?;
 
         let mut bpb32 = BiosParameterBlockFAT32::default();
-        bpb32.fat_size = disk.read_u32::<LittleEndian>()?;
-        bpb32.ext_flags = disk.read_u16::<LittleEndian>()?;
-        bpb32.fs_ver = disk.read_u16::<LittleEndian>()?;
-        bpb32.root_cluster = disk.read_u32::<LittleEndian>()?;
-        bpb32.fs_info = disk.read_u16::<LittleEndian>()?;
-        bpb32.bk_boot_sec = disk.read_u16::<LittleEndian>()?;
-        disk.read(&mut bpb32.reserved)?;
-        bpb32.drv_num = disk.read_u8()?;
-        bpb32.reserved1 = disk.read_u8()?;
-        bpb32.boot_sig = disk.read_u8()?;
-        bpb32.vol_id = disk.read_u32::<LittleEndian>()?;
-        disk.read(&mut bpb32.volume_label)?;
-        disk.read(&mut bpb32.file_sys_type)?;
+        bpb32.fat_size = cursor.read_u32::<LittleEndian>()?;
+        bpb32.ext_flags = cursor.read_u16::<LittleEndian>()?;
+        bpb32.fs_ver = cursor.read_u16::<LittleEndian>()?;
+        bpb32.root_cluster = cursor.read_u32::<LittleEndian>()?;
+        bpb32.fs_info = cursor.read_u16::<LittleEndian>()?;
+        bpb32.bk_boot_sec = cursor.read_u16::<LittleEndian>()?;
+        cursor.read_exact(&mut bpb32.reserved)?;
+        bpb32.drv_num = cursor.read_u8()?;
+        bpb32.reserved1 = cursor.read_u8()?;
+        bpb32.boot_sig = cursor.read_u8()?;
+        bpb32.vol_id = cursor.read_u32::<LittleEndian>()?;
+        cursor.read(&mut bpb32.volume_label)?;
+        cursor.read(&mut bpb32.file_sys_type)?;
         //disk.read_exact(&mut bpb32.code)?;
-        disk.seek(SeekFrom::Current(420))?;
-        disk.read(&mut bpb.sig)?;
+        cursor.seek(SeekFrom::Current(420))?;
+        cursor.read(&mut bpb.sig)?;
 
         let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);
         let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
