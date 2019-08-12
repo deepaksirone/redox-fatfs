@@ -97,8 +97,12 @@ impl FsInfo {
         let block_vec = get_block_buffer(offset, Self::FS_INFO_SIZE);
         let mut cursor = Cursor::new(block_vec);
         let mut fsinfo = FsInfo::default();
+
+        disk.seek(SeekFrom::Start((offset / BLOCK_SIZE) * BLOCK_SIZE));
         let read = disk.read(cursor.get_mut())?;
         println!("Read {:?} bytes into block vec", read);
+        cursor.seek(SeekFrom::Start(offset % BLOCK_SIZE))?;
+        println!("Seeking cursor to offset: {:?}", offset % BLOCK_SIZE);
 
         fsinfo.lead_sig = cursor.read_u32::<LittleEndian>()?;
         cursor.seek(SeekFrom::Current(480))?;
@@ -205,13 +209,13 @@ pub struct FileSystem<D: Read + Write + Seek> {
 impl<D: Read + Write + Seek> FileSystem<D> {
 
     pub fn from_offset(partition_offset: u64, mut disk: D) -> Result<FileSystem<D>> {
-        disk.seek(SeekFrom::Start(partition_offset))?;
+        disk.seek(SeekFrom::Start((partition_offset / BLOCK_SIZE) * BLOCK_SIZE))?;
         let bpb = BiosParameterBlock::populate(&mut disk)?;
 
         let fsinfo = match bpb.fat_type {
             FATType::FAT32(s) => {
                 let offset = partition_offset + s.fs_info as u64 * bpb.bytes_per_sector as u64;
-                FsInfo::populate(&mut disk, offset).expect("Error Parsing FsInfo")
+                FsInfo::populate(&mut disk, offset)?
             },
             _ => FsInfo::default()
         };
