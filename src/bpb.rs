@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, SeekFrom, Cursor};
+use std::io::{Read, Seek, SeekFrom, Cursor, Error, ErrorKind};
 use std::default::Default;
 use std::fmt;
 use super::Result;
@@ -187,6 +187,7 @@ impl BiosParameterBlock {
         cursor.seek(SeekFrom::Current(420))?;
         cursor.read(&mut bpb.sig)?;
 
+        bpb.validate(&bpb32)?;
         let root_sectors = ((bpb.root_entries_cnt as u32 * 32) + (bpb.bytes_per_sector as u32) - 1) / (bpb.bytes_per_sector as u32);
         let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u32 } else { bpb32.fat_size };
         let tot_sec = if bpb.total_sectors_16 != 0 { bpb.total_sectors_16 as u32 } else { bpb.total_sectors_32 };
@@ -200,9 +201,81 @@ impl BiosParameterBlock {
         Ok(bpb)
     }
 
-    pub fn validate(&self) -> bool {
+    //Taken from github.com/rafalh/rust-fatfs
+    pub fn validate(&self, bpb32: &BiosParameterBlockFAT32) -> Result<()> {
         //TODO: Add validity checks
-        true
+        if self.bytes_per_sector.count_ones() != 1 {
+            return Err(Error::new(ErrorKind::Other, "Invalid bytes per sector(not a power of 2"))
+        } else if self.bytes_per_sector < 512 {
+            return Err(Error::new(ErrorKind::Other, "Invalid bytes per sector (value < 512)"))
+        } else if self.bytes_per_sector > 4096 {
+            return Err(Error::new(ErrorKind::Other, "Invalid bytes per sector (value > 4096)"))
+        }
+
+        let is_fat32 = self.is_fat32();
+        if self.rsvd_sec_cnt < 1 {
+            return Err(Error::new(ErrorKind::Other, "Invalid rsvd_sec_cnt value in BPB"));
+        }
+
+        if self.num_fats == 0 {
+            return Err(Error::new(ErrorKind::Other, "invalid fats value in BPB"));
+        }
+
+        if is_fat32 && self.root_entries_cnt != 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Invalid root_entries value in BPB (should be zero for FAT32)",
+            ));
+        }
+
+        if is_fat32 && self.total_sectors_16 != 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Invalid total_sectors_16 value in BPB (should be zero for FAT32)",
+            ));
+        }
+
+        if (self.total_sectors_16 == 0) == (self.total_sectors_32 == 0) {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Invalid BPB (total_sectors_16 or total_sectors_32 should be non-zero)",
+            ));
+        }
+
+
+        if is_fat32 && bpb32.fat_size == 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Invalid sectors_per_fat_32 value in BPB (should be non-zero for FAT32)",
+            ));
+        }
+
+        if bpb32.fs_ver != 0 {
+            return Err(Error::new(ErrorKind::Other, "Unknown FS version"));
+        }
+
+
+        let root_sectors = ((self.root_entries_cnt as u32 * 32) + (self.bytes_per_sector as u32) - 1) / (self.bytes_per_sector as u32);
+        let fat_sz = if self.fat_size_16 != 0 { self.fat_size_16 as u32 } else { bpb32.fat_size };
+        let tot_sec = if self.total_sectors_16 != 0 { self.total_sectors_16 as u32 } else { self.total_sectors_32 };
+        let first_data_sec = ((self.rsvd_sec_cnt as u32) + (self.num_fats as u32) * fat_sz + root_sectors);
+        let data_sec = tot_sec - ((self.rsvd_sec_cnt as u32) + (self.num_fats as u32) * fat_sz + root_sectors);
+
+        let count_clusters = data_sec / (self.sectors_per_cluster as u32);
+
+        if tot_sec <= first_data_sec {
+            return Err(Error::new(ErrorKind::Other, "Total sectors lesser than first data sector"))
+        }
+
+        if is_fat32 != (count_clusters >= 65525) {
+            return Err(Error::new(ErrorKind::Other, "FAT determination using tot_sec_16 and count_cluster differs"))
+        }
+        Ok(())
+    }
+
+    fn is_fat32(&self) -> bool {
+        //Seemingly the best way
+        self.total_sectors_16 == 0
     }
 
 }

@@ -124,28 +124,41 @@ impl FsInfo {
 
     pub fn update<D: Read + Seek>(&mut self, disk: &mut D) -> Result<()> {
         if let Some(off) = self.offset {
-            disk.seek(SeekFrom::Start(off))?;
-            self.lead_sig = disk.read_u32::<LittleEndian>()?;
-            disk.seek(SeekFrom::Current(480))?;
-            self.struc_sig = disk.read_u32::<LittleEndian>()?;
-            self.free_count = disk.read_u32::<LittleEndian>()?;
-            self.next_free = disk.read_u32::<LittleEndian>()?;
-            disk.seek(SeekFrom::Current(12))?;
-            self.trail_sig = disk.read_u32::<LittleEndian>()?;
+            let block_vec = get_block_buffer(off, Self::FS_INFO_SIZE);
+            let mut cursor = Cursor::new(block_vec);
+            disk.seek(SeekFrom::Start((off / BLOCK_SIZE) * BLOCK_SIZE))?;
+            disk.read(cursor.get_mut())?;
+            cursor.seek(SeekFrom::Start(off % BLOCK_SIZE))?;
+
+            self.lead_sig = cursor.read_u32::<LittleEndian>()?;
+            cursor.seek(SeekFrom::Current(480))?;
+            self.struc_sig = cursor.read_u32::<LittleEndian>()?;
+            self.free_count = cursor.read_u32::<LittleEndian>()?;
+            self.next_free = cursor.read_u32::<LittleEndian>()?;
+            cursor.seek(SeekFrom::Current(12))?;
+            self.trail_sig = cursor.read_u32::<LittleEndian>()?;
         }
         Ok(())
     }
 
-    pub fn flush<D: Write + Seek>(&self, disk: &mut D) -> Result<()> {
+    pub fn flush<D: Read + Write + Seek>(&self, disk: &mut D) -> Result<()> {
         if let Some(off) = self.offset {
-            disk.seek(SeekFrom::Start(off))?;
-            disk.write_u32::<LittleEndian>(self.lead_sig)?;
-            disk.seek(SeekFrom::Current(480))?;
-            disk.write_u32::<LittleEndian>(self.struc_sig)?;
-            disk.write_u32::<LittleEndian>(self.free_count)?;
-            disk.write_u32::<LittleEndian>(self.next_free)?;
-            disk.seek(SeekFrom::Current(12))?;
-            disk.write_u32::<LittleEndian>(self.trail_sig)?;
+            let block_vec = get_block_buffer(off, Self::FS_INFO_SIZE);
+            let mut cursor = Cursor::new(block_vec);
+            disk.seek(SeekFrom::Start((off / BLOCK_SIZE) * BLOCK_SIZE))?;
+            disk.read(cursor.get_mut())?;
+            cursor.seek(SeekFrom::Start(off % BLOCK_SIZE))?;
+
+            cursor.write_u32::<LittleEndian>(self.lead_sig)?;
+            cursor.seek(SeekFrom::Current(480))?;
+            cursor.write_u32::<LittleEndian>(self.struc_sig)?;
+            cursor.write_u32::<LittleEndian>(self.free_count)?;
+            cursor.write_u32::<LittleEndian>(self.next_free)?;
+            cursor.seek(SeekFrom::Current(12))?;
+            cursor.write_u32::<LittleEndian>(self.trail_sig)?;
+
+            disk.seek(SeekFrom::Start((off / BLOCK_SIZE) * BLOCK_SIZE))?;
+            disk.write(cursor.get_ref())?;
         }
         Ok(())
     }
@@ -226,7 +239,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         else {
             match bpb.fat_type {
                 FATType::FAT32(x) => x.fat_size as u64,
-                _ => panic!("FAT12 and FAT16 volumes should have non-zero BPB_FATSz16")
+                _ => return Err(Error::new(ErrorKind::InvalidData, "FAT12 and FAT16 volumes should have non-zero BPB_FATSz16"))
             }
         };
         let first_data_sec = bpb.rsvd_sec_cnt as u64 + (bpb.num_fats as u64 * fat_sz) + root_dir_sec;
