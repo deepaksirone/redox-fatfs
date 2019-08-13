@@ -106,7 +106,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
         let mut fs = self.fs.borrow_mut();
         let dentry = Dir::get_entry_abs(path, &mut fs).ok();
-        println!("Found dir entry for path = {:?}", path);
+        println!("Found dir entry {:?} for path = {:?}", dentry, path);
         //let node_opt = self.path_nodes(&mut fs, path, uid, gid, &mut nodes)?;
         let resource: Box<dyn Resource<D>> = match dentry {
             Some(e) => if flags & (O_CREAT | O_EXCL) == O_CREAT | O_EXCL {
@@ -197,7 +197,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
                 let root_dir = fs.root_dir();
 
                 // Mount point root '/' may be accessed if permissions match
-                if self.permission(uid, gid, MODE_WRITE) {
+                if !self.permission(uid, gid, MODE_WRITE) {
                     // println!("dir not writable {:o}", parent.1.mode);
                     return Err(Error::new(EACCES));
                 }

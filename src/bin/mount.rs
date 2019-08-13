@@ -289,7 +289,7 @@ fn main() {
                     Some(u) => match u.parse::<u16>() {
                         Ok(i) => i,
                         Err(e) =>  {
-                            println!("redox-fatfs: invalid gid '{}': {}", u, e);
+                            println!("redox-fatfs: invalid mode '{}': {}", u, e);
                             usage();
                             process::exit(1);
                         }
