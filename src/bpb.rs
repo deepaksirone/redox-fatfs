@@ -151,6 +151,7 @@ impl BiosParameterBlock {
     pub fn populate<D: Read+Seek>(disk: &mut D) -> Result<BiosParameterBlock> {
         let mut cursor = Cursor::new(vec![0u8; BLOCK_SIZE as usize]);
         let mut bpb  = BiosParameterBlock::default();
+        //Disk seek should be already aligned to BLOCK_SIZE
         let read_amount = disk.read(cursor.get_mut())?;
         println!("Read into cursor!: {:?}", read_amount);
         cursor.read_exact(&mut bpb.jmp_boot)?;

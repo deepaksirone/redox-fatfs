@@ -1,4 +1,4 @@
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Write, Seek, SeekFrom, Cursor};
 use std::iter::{Iterator, FromIterator};
 use std::io::{ErrorKind, Error};
 use std::{num, str};
@@ -8,7 +8,7 @@ use std::char;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use Cluster;
-use filesystem::FileSystem;
+use filesystem::{FileSystem, get_block_buffer};
 use table::{FatEntry, get_entry, allocate_cluster, deallocate_cluster_chain};
 
 use super::Result;
@@ -836,25 +836,39 @@ impl LongDirEntry {
     }
 
     fn flush<D: Read + Write + Seek>(&self, offset: u64, fs: &mut FileSystem<D>) -> Result<()> {
-        fs.seek_to(offset)?;
-        fs.disk.borrow_mut().write_u8(self.ord)?;
+        //fs.seek_to(offset)?;
+
+        let blk_offset = fs.get_block_offset(offset);
+
+        let block_buf = get_block_buffer(fs.get_raw_offset(offset), DIR_ENTRY_LEN);
+        let mut cursor = Cursor::new(block_buf);
+
+        fs.seek_to_block(offset)?;
+        fs.disk.borrow_mut().read(cursor.get_mut())?;
+        cursor.seek(SeekFrom::Start(blk_offset))?;
+
+        cursor.write_u8(self.ord)?;
         //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name1)?;
         for b in &self.name1 {
-            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b)?;
+            cursor.write_u16::<LittleEndian>(*b)?;
         }
 
-        fs.disk.borrow_mut().write_u8(self.file_attrs.bits)?;
-        fs.disk.borrow_mut().write_u8(self.dirent_type)?;
-        fs.disk.borrow_mut().write_u8(self.chksum)?;
+        cursor.write_u8(self.file_attrs.bits)?;
+        cursor.write_u8(self.dirent_type)?;
+        cursor.write_u8(self.chksum)?;
         //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name2)?;
         for b in &self.name2 {
-            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b)?;
+            cursor.write_u16::<LittleEndian>(*b)?;
         }
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.first_clus_low)?;
+        cursor.write_u16::<LittleEndian>(self.first_clus_low)?;
         //fs.disk.borrow_mut().write_u16_into::<LittleEndian>(&self.name3)?;
         for b in &self.name3 {
-            fs.disk.borrow_mut().write_u16::<LittleEndian>(*b)?;
+            cursor.write_u16::<LittleEndian>(*b)?;
         }
+
+        fs.seek_to_block(offset)?;
+        fs.disk.borrow_mut().write(cursor.get_ref())?;
+        fs.disk.borrow_mut().flush()?;
         Ok(())
     }
 }
@@ -988,19 +1002,32 @@ impl ShortDirEntry {
     }
 
     pub fn flush<D: Read + Write + Seek>(&self, offset: u64, fs: &mut FileSystem<D>) -> Result<()> {
-        fs.seek_to(offset)?;
-        fs.disk.borrow_mut().write(&self.dir_name)?;
-        fs.disk.borrow_mut().write_u8(self.file_attrs.bits)?;
-        fs.disk.borrow_mut().write_u8(self.nt_res)?;
-        fs.disk.borrow_mut().write_u8(self.crt_time_tenth)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.crt_time)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.crt_date)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.lst_acc_date)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.fst_clst_hi)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.wrt_time)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.wrt_date)?;
-        fs.disk.borrow_mut().write_u16::<LittleEndian>(self.fst_clus_lo)?;
-        fs.disk.borrow_mut().write_u32::<LittleEndian>(self.file_size)?;
+        //fs.seek_to(offset)?;
+        //let fat_offset = get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec());
+        let blk_offset = fs.get_block_offset(offset);
+
+        let block_buf = get_block_buffer(fs.get_raw_offset(offset), DIR_ENTRY_LEN);
+        let mut cursor = Cursor::new(block_buf);
+
+        fs.seek_to_block(offset)?;
+        fs.disk.borrow_mut().read(cursor.get_mut())?;
+
+        cursor.seek(SeekFrom::Start(blk_offset))?;
+        cursor.write(&self.dir_name)?;
+        cursor.write_u8(self.file_attrs.bits)?;
+        cursor.write_u8(self.nt_res)?;
+        cursor.write_u8(self.crt_time_tenth)?;
+        cursor.write_u16::<LittleEndian>(self.crt_time)?;
+        cursor.write_u16::<LittleEndian>(self.crt_date)?;
+        cursor.write_u16::<LittleEndian>(self.lst_acc_date)?;
+        cursor.write_u16::<LittleEndian>(self.fst_clst_hi)?;
+        cursor.write_u16::<LittleEndian>(self.wrt_time)?;
+        cursor.write_u16::<LittleEndian>(self.wrt_date)?;
+        cursor.write_u16::<LittleEndian>(self.fst_clus_lo)?;
+        cursor.write_u32::<LittleEndian>(self.file_size)?;
+
+        fs.seek_to_block(offset)?;
+        fs.disk.borrow_mut().write(cursor.get_ref())?;
         fs.disk.borrow_mut().flush()?;
         Ok(())
     }
@@ -1206,43 +1233,54 @@ fn construct_dentry(mut lfn_entries: Vec<DirEntryRaw>, dir_path: &String, loc: (
 }
 
 pub fn get_dir_entry_raw<D: Read + Write + Seek>(fs: &mut FileSystem<D>, offset: u64) -> Result<DirEntryRaw> {
-    fs.seek_to(offset)?;
-    let dir_0 = fs.disk.borrow_mut().read_u8()?;
+    //fs.seek_to(offset)?;
+    //let fat_offset = get_fat_offset(fs.bpb.fat_type, Cluster::new(cluster), fs.fat_start_sector(), fs.bytes_per_sec());
+    let blk_offset = fs.get_block_offset(offset);
+
+    let block_buf = get_block_buffer(fs.get_raw_offset(offset), DIR_ENTRY_LEN);
+    let mut cursor = Cursor::new(block_buf);
+
+    fs.seek_to_block(offset)?;
+    fs.disk.borrow_mut().read(cursor.get_mut())?;
+    cursor.seek(SeekFrom::Start(blk_offset))?;
+
+    let dir_0 = cursor.read_u8()?;
     match dir_0 {
         0x00 => Ok(DirEntryRaw::FreeRest),
         0xe5 => Ok(DirEntryRaw::Free),
         _ => {
-            fs.disk.borrow_mut().seek(SeekFrom::Current(10))?;
-            let f_attr: FileAttributes = FileAttributes::from_bits(fs.disk.borrow_mut().read_u8()?)
+            cursor.seek(SeekFrom::Current(10))?;
+            let f_attr: FileAttributes = FileAttributes::from_bits(cursor.read_u8()?)
                 .ok_or(Error::new(ErrorKind::Other, "Error Reading File Attr"))?;
-            fs.seek_to(offset)?;
+            //fs.seek_to(offset)?;
+            cursor.seek(SeekFrom::Start(blk_offset))?;
             if f_attr.contains(FileAttributes::LFN) {
                 let mut ldr = LongDirEntry::default();
-                ldr.ord = fs.disk.borrow_mut().read_u8()?;
-                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name1)?;
-                ldr.file_attrs = FileAttributes::from_bits(fs.disk.borrow_mut().read_u8()?)
+                ldr.ord = cursor.read_u8()?;
+                cursor.read_u16_into::<LittleEndian>(&mut ldr.name1)?;
+                ldr.file_attrs = FileAttributes::from_bits(cursor.read_u8()?)
                     .ok_or(Error::new(ErrorKind::Other, "Error Reading File Attr"))?;
-                ldr.dirent_type = fs.disk.borrow_mut().read_u8()?;
-                ldr.chksum = fs.disk.borrow_mut().read_u8()?;
-                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name2)?;
-                ldr.first_clus_low = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                fs.disk.borrow_mut().read_u16_into::<LittleEndian>(&mut ldr.name3)?;
+                ldr.dirent_type = cursor.read_u8()?;
+                ldr.chksum = cursor.read_u8()?;
+                cursor.read_u16_into::<LittleEndian>(&mut ldr.name2)?;
+                ldr.first_clus_low = cursor.read_u16::<LittleEndian>()?;
+                cursor.read_u16_into::<LittleEndian>(&mut ldr.name3)?;
                 Ok(DirEntryRaw::Long(ldr))
             } else {
                 let mut sdr = ShortDirEntry::default();
-                fs.disk.borrow_mut().read(&mut sdr.dir_name)?;
-                sdr.file_attrs = FileAttributes::from_bits(fs.disk.borrow_mut().read_u8()?)
+                cursor.read(&mut sdr.dir_name)?;
+                sdr.file_attrs = FileAttributes::from_bits(cursor.read_u8()?)
                     .ok_or(Error::new(ErrorKind::Other, "Error Reading File Attr"))?;
-                sdr.nt_res = fs.disk.borrow_mut().read_u8()?;
-                sdr.crt_time_tenth = fs.disk.borrow_mut().read_u8()?;
-                sdr.crt_time = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.crt_date = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.lst_acc_date = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.fst_clst_hi = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.wrt_time = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.wrt_date = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.fst_clus_lo = fs.disk.borrow_mut().read_u16::<LittleEndian>()?;
-                sdr.file_size = fs.disk.borrow_mut().read_u32::<LittleEndian>()?;
+                sdr.nt_res = cursor.read_u8()?;
+                sdr.crt_time_tenth = cursor.read_u8()?;
+                sdr.crt_time = cursor.read_u16::<LittleEndian>()?;
+                sdr.crt_date = cursor.read_u16::<LittleEndian>()?;
+                sdr.lst_acc_date = cursor.read_u16::<LittleEndian>()?;
+                sdr.fst_clst_hi = cursor.read_u16::<LittleEndian>()?;
+                sdr.wrt_time = cursor.read_u16::<LittleEndian>()?;
+                sdr.wrt_date = cursor.read_u16::<LittleEndian>()?;
+                sdr.fst_clus_lo = cursor.read_u16::<LittleEndian>()?;
+                sdr.file_size = cursor.read_u32::<LittleEndian>()?;
                 Ok(DirEntryRaw::Short(sdr))
             }
 

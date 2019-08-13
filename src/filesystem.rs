@@ -5,7 +5,7 @@ use std::io::{Read, Write, Seek, SeekFrom, Error, ErrorKind, Cursor};
 use std::default::Default;
 use std::iter::Iterator;
 use std::cell::{RefCell};
-use std::cmp::{Eq, PartialEq, PartialOrd, Ordering};
+use std::cmp::{Eq, PartialEq, PartialOrd, Ordering, min};
 
 use BiosParameterBlock;
 //use disk::Disk;
@@ -282,10 +282,29 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         self.cluster_iter(start_cluster).fold(0, |sz, _cluster| sz + 1)
     }
 
-    pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        let partition_offset = self.partition_offset;
-        self.disk.borrow_mut().seek(SeekFrom::Start(partition_offset + offset))?;
-        self.disk.borrow_mut().read(buf)
+    pub fn read_at(&mut self, mut offset: u64, buf: &mut [u8]) -> Result<usize> {
+        //let partition_offset = self.partition_offset;
+        //self.disk.borrow_mut().seek(SeekFrom::Start(partition_offset + offset))?;
+        //self.disk.borrow_mut().read(buf)
+        let num_blocks = (buf.len() + BLOCK_SIZE as usize - 1) / BLOCK_SIZE as usize;
+        let blk_offset = self.get_block_offset(offset);
+
+        let block_buf = get_block_buffer(self.get_raw_offset(offset), BLOCK_SIZE);
+        let mut cursor = Cursor::new(block_buf);
+        let mut start = 0;
+
+        for i in 0..num_blocks {
+            self.seek_to_block(offset)?;
+            self.disk.borrow_mut().read_exact(cursor.get_mut())?;
+            cursor.seek(SeekFrom::Start(blk_offset))?;
+            let bytes_remaining_block = BLOCK_SIZE - blk_offset;
+            let read_len = min(bytes_remaining_block as usize, buf.len() - start);
+            cursor.read(&mut buf[start.. start + read_len])?;
+            start += read_len;
+            offset += read_len as u64;
+        }
+
+        Ok(start)
     }
 
     pub fn seek_to(&mut self, offset: u64) -> Result<usize> {
@@ -295,17 +314,49 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         }
     }
 
-    /*
-    pub fn seek_to_block(&mut self, block_number: u64) -> Result<usize> {
-        let raw_block_number = self.partition_offset + block_number
-    }*/
+    pub fn seek_to_block(&mut self, offset: u64) -> Result<usize> {
+        let off = self.partition_offset + offset;
+        let block = off / BLOCK_SIZE;
+        self.disk.borrow_mut().seek(SeekFrom::Start(block * BLOCK_SIZE)).map(|s| s as usize)
+    }
 
-    pub fn write_to(&mut self, offset: u64, buf: &[u8]) -> Result<usize> {
-        self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
-        let written = self.disk.borrow_mut().write(buf)?;
-        self.disk.borrow_mut().flush()?;
+    pub fn get_block_offset(&self, offset: u64) -> u64 {
+        (self.partition_offset + offset) % BLOCK_SIZE
+    }
+
+    pub fn get_raw_offset(&self, offset: u64) -> u64 {
+        self.partition_offset + offset
+    }
+
+    pub fn write_to(&mut self, mut offset: u64, buf: &[u8]) -> Result<usize> {
+        //self.disk.borrow_mut().seek(SeekFrom::Start(self.partition_offset + offset))?;
+        //let written = self.disk.borrow_mut().write(buf)?;
+        //self.disk.borrow_mut().flush()?;
         //println!("Write Success");
-        Ok(written)
+        //Ok(written)
+        let num_blocks = (buf.len() + BLOCK_SIZE as usize- 1) / BLOCK_SIZE as usize;
+        let blk_offset = self.get_block_offset(offset);
+
+        let block_buf = get_block_buffer(self.get_raw_offset(offset), BLOCK_SIZE);
+        let mut cursor = Cursor::new(block_buf);
+        let mut start = 0;
+
+        for i in 0..num_blocks {
+            self.seek_to_block(offset)?;
+            self.disk.borrow_mut().read_exact(cursor.get_mut())?;
+            cursor.seek(SeekFrom::Start(blk_offset))?;
+
+            let bytes_remaining_block = BLOCK_SIZE - blk_offset;
+            let write_len = min(bytes_remaining_block as usize, buf.len() - start);
+            cursor.write(&buf[start .. start + write_len])?;
+            start += write_len;
+            offset += write_len as u64;
+
+            self.seek_to_block(offset)?;
+            self.disk.borrow_mut().write(cursor.get_ref())?;
+        }
+
+        Ok(start)
     }
 
     pub fn seek_to_cluster(&mut self, cluster: Cluster) -> Result<usize> {
