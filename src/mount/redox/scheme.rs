@@ -102,10 +102,11 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     fn open(&self, url: &[u8], flags: usize, uid: u32, gid: u32) -> Result<usize> {
         let path = str::from_utf8(url).unwrap_or("").trim_matches('/');
 
-        // println!("Open '{}' {:X}", path, flags);
+        println!("Open '{}' {:X}", path, flags);
 
         let mut fs = self.fs.borrow_mut();
         let dentry = Dir::get_entry_abs(path, &mut fs).ok();
+        println!("Found dir entry for path = {:?}", path);
         //let node_opt = self.path_nodes(&mut fs, path, uid, gid, &mut nodes)?;
         let resource: Box<dyn Resource<D>> = match dentry {
             Some(e) => if flags & (O_CREAT | O_EXCL) == O_CREAT | O_EXCL {
@@ -128,7 +129,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
                         }
                         data.extend_from_slice(&name.as_bytes());
                     }
-
+                    println!("Created a dirResource for path = {:?} with data = {:?}", path, data);
                     Box::new(DirResource::new(e.to_dir(), Some(data), Some(self.mount_uid),
                                               Some(self.mount_gid), Some(self.mount_mode)))
                 } else if flags & O_WRONLY == O_WRONLY {
@@ -321,7 +322,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
     #[allow(unused_variables)]
     fn read(&self, id: usize, buf: &mut [u8]) -> Result<usize> {
-        // println!("Read {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
+        println!("Read {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
         let mut files = self.files.lock();
         let mut fs = self.fs.borrow_mut();
         if let Some(file) = files.get_mut(&id) {
@@ -332,7 +333,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn write(&self, id: usize, buf: &[u8]) -> Result<usize> {
-        // println!("Write {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
+        println!("Write {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
         let mut files = self.files.lock();
         let mut fs = self.fs.borrow_mut();
         if let Some(file) = files.get_mut(&id) {
@@ -343,7 +344,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn seek(&self, id: usize, pos: usize, whence: usize) -> Result<usize> {
-        // println!("Seek {}, {} {}", id, pos, whence);
+        println!("Seek {}, {} {}", id, pos, whence);
         let mut files = self.files.lock();
         let mut fs = self.fs.borrow_mut();
         if let Some(file) = files.get_mut(&id) {
@@ -371,7 +372,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn fpath(&self, id: usize, buf: &mut [u8]) -> Result<usize> {
-        // println!("Fpath {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
+        println!("Fpath {}, {:X} {}", id, buf.as_ptr() as usize, buf.len());
         let files = self.files.lock();
         if let Some(file) = files.get(&id) {
             let name = self.name.as_bytes();
@@ -499,7 +500,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn fstat(&self, id: usize, stat: &mut Stat) -> Result<usize> {
-        // println!("Fstat {}, {:X}", id, stat as *mut Stat as usize);
+        println!("Fstat {}, {:X}", id, stat as *mut Stat as usize);
         let files = self.files.lock();
         if let Some(file) = files.get(&id) {
             file.stat(stat, &mut self.fs.borrow_mut())
@@ -528,7 +529,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn fsync(&self, id: usize) -> Result<usize> {
-        // println!("Fsync {}", id);
+        println!("Fsync {}", id);
         let mut files = self.files.lock();
         if let Some(file) = files.get_mut(&id) {
             file.sync(&mut self.fmaps.lock(), &mut self.fs.borrow_mut())
@@ -538,7 +539,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn ftruncate(&self, id: usize, len: usize) -> Result<usize> {
-        // println!("Ftruncate {}, {}", id, len);
+        println!("Ftruncate {}, {}", id, len);
         let mut files = self.files.lock();
         if let Some(file) = files.get_mut(&id) {
             file.truncate(len, &mut self.fs.borrow_mut())
@@ -548,7 +549,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn futimens(&self, id: usize, times: &[TimeSpec]) -> Result<usize> {
-        // println!("Futimens {}, {}", id, times.len());
+        println!("Futimens {}, {}", id, times.len());
         let mut files = self.files.lock();
         if let Some(file) = files.get_mut(&id) {
             file.utimens(times, self.mount_uid, &mut self.fs.borrow_mut())
@@ -558,7 +559,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn fmap(&self, id: usize, map: &Map) -> Result<usize> {
-        // println!("Fmap {}, {:?}", id, map);
+        println!("Fmap {}, {:?}", id, map);
         let mut files = self.files.lock();
         if let Some(file) = files.get_mut(&id) {
             file.fmap(map, &mut self.fmaps.lock(), &mut self.fs.borrow_mut())
@@ -568,7 +569,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn close(&self, id: usize) -> Result<usize> {
-        // println!("Close {}", id);
+        println!("Close {}", id);
         let mut files = self.files.lock();
         if let Some(mut file) = files.remove(&id) {
             let _ = file.funmap(&mut self.fmaps.lock(), &mut self.fs.borrow_mut());
