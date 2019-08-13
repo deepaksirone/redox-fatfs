@@ -70,6 +70,7 @@ impl Dir {
     }
 
     pub fn size<D: Read + Write + Seek>(&self, fs: &mut FileSystem<D>) -> u64 {
+
         fs.num_clusters_chain(self.first_cluster) * fs.bytes_per_cluster()
     }
 

@@ -249,7 +249,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     fn rmdir(&self, url: &[u8], uid: u32, gid: u32) -> Result<usize> {
         let path = str::from_utf8(url).unwrap_or("").trim_matches('/');
 
-        // println!("Rmdir '{}'", path);
+        println!("Rmdir '{}'", path);
 
         let mut fs = self.fs.borrow_mut();
 
@@ -275,7 +275,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     fn unlink(&self, url: &[u8], uid: u32, gid: u32) -> Result<usize> {
         let path = str::from_utf8(url).unwrap_or("").trim_matches('/');
 
-        // println!("Unlink '{}'", path);
+        println!("Unlink '{}'", path);
 
         let mut fs = self.fs.borrow_mut();
 
@@ -301,7 +301,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     /* Resource operations */
     #[allow(unused_variables)]
     fn dup(&self, old_id: usize, buf: &[u8]) -> Result<usize> {
-        // println!("Dup {}", old_id);
+        println!("Dup {}", old_id);
 
         if ! buf.is_empty() {
             return Err(Error::new(EINVAL));
@@ -400,7 +400,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     fn frename(&self, id: usize, url: &[u8], uid: u32, _gid: u32) -> Result<usize> {
         let path = str::from_utf8(url).unwrap_or("").trim_matches('/');
 
-        // println!("Frename {}, {} from {}, {}", id, path, uid, gid);
+        println!("Frename {}, {} from {}, {}", id, path, uid, _gid);
 
         let mut files = self.files.lock();
         if let Some(file) = files.get_mut(&id) {
@@ -510,6 +510,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
     }
 
     fn fstatvfs(&self, id: usize, stat: &mut StatVfs) -> Result<usize> {
+        println!("FstatVfs {}, {:X}", id, stat as *mut StatVfs as usize);
         let files = self.files.lock();
         if let Some(_file) = files.get(&id) {
             let mut fs = self.fs.borrow_mut();

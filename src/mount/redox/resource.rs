@@ -153,7 +153,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         *stat = Stat {
             st_dev: 0, // TODO
             st_ino: self.dir.first_cluster.cluster_number,
-            st_mode: self.mode.unwrap_or(0o755), //TODO
+            st_mode: self.mode.unwrap_or(0o777), //TODO
             st_nlink: 1,
             st_uid: self.uid.unwrap_or(0),
             st_gid: self.gid.unwrap_or(0),
@@ -164,6 +164,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
             st_ctime_nsec: 0,
             ..Default::default()
         };
+        println!("Dir Stat Structure: {:?}", stat);
 
         Ok(0)
     }
