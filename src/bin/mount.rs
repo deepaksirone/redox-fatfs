@@ -247,7 +247,7 @@ fn main() {
                 0
             }
         },
-        None => {
+        None => {gid
             println!("redox-fatfs: no uid provided, defaulting to 0");
             0
         }
@@ -301,12 +301,12 @@ fn main() {
                 };
                 uid
             } else {
-                println!("redox-fatfs: no gid provided, defaulting to 0o777");
+                println!("redox-fatfs: no mode provided, defaulting to 0o777");
                 0o777
             }
         },
         None => {
-            println!("redox-fatfs: no gid provided, defaulting to 0o777");
+            println!("redox-fatfs: no mode provided, defaulting to 0o777");
             0o777
         }
     };

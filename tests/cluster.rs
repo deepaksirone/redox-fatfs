@@ -4,10 +4,11 @@ extern crate redox_fatfs;
 
 use std::fs::OpenOptions;
 use std::str;
+use std::io::{Seek, SeekFrom, Read, Cursor};
 
 use redox_fatfs::*;
 
-#[test]
+
 fn print_fat32() {
     let f = OpenOptions::new().read(true).write(true).open("images/fat32.img").expect("Failed to open file");
     let mut fs = redox_fatfs::FileSystem::from_offset(0, f).expect("Parsing Error");
@@ -82,15 +83,17 @@ fn print_fat32() {
 
     println!("Attempting to remove hello.txt: {:?}", root_d.remove("/hello.txt", &mut fs));
     println!("Attempting to remove someDir: {:?}", root_d.remove("/someDir", &mut fs));
-    let hello = root_d.create_file("/hello1.txt", &mut fs).expect("Error Creating hello.txt");
-    println!("Created hello.txt");
+    let hello = root_d.create_file("/hello5.txt", &mut fs).expect("Error Creating hello.txt");
+    println!("Created hello1.txt");
     let r = Dir::rename(&mut DirEntry::File(hello), "/hello2.txt", &mut fs);
     println!("Attempting to move hello1.txt to hello2.txt : {:?}", r);
-    let mut dir1 = root_d.create_dir("/dir1/", &mut fs).expect("Error creating dir1");
-    println!("Created dir1");
-    let mut dir2 = dir1.create_dir("/dir2", &mut fs).expect("Error creating dir2");
-    println!("Created dir2");
-    let hello2 =dir2.create_file("/hello2.txt/", &mut fs);
+    let mut dir1 = root_d.create_dir("/dir5/", &mut fs).expect("Error creating dir1");
+    println!("Created dir5");
+    let mut dir2 = dir1.create_dir("/dir6", &mut fs).expect("Error creating dir2");
+    println!("Created dir6");
+    let mut hello2 = dir2.create_file("/hello2.txt/", &mut fs).expect("Error creating hello2.txt");
+    hello2.write("This is something in hello2".as_bytes(), &mut fs, 0).expect("Failed to write hello2.txt");
+
 
 }
 
@@ -253,4 +256,26 @@ fn rsplit_path(path: &str) -> (&str, Option<&str>) {
     let comp = path_split.next().unwrap();
     let rest_opt = path_split.next();
     (comp, rest_opt)
+}
+
+fn split_path(path: &str) -> (&str, Option<&str>) {
+    let mut path_split = path.trim_matches('/').splitn(2, "/");
+    let comp = path_split.next().unwrap();
+    let rest_opt = path_split.next();
+    (comp, rest_opt)
+}
+
+fn test_cursor() {
+    let mut v = vec![1, 2, 3, 4, 5, 6];
+    let mut cursor = Cursor::new(v);
+    cursor.seek(SeekFrom::Start(2));
+    for x in cursor.get_ref() {
+        println!("Val = {}", x);
+    }
+}
+
+#[test]
+fn test_split() {
+    let path = "";
+    println!("Split path: {:?}", split_path(path));
 }
