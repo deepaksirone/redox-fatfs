@@ -334,7 +334,7 @@ fn main() {
 
                 let mut res = [0];
                 read.read(&mut res).unwrap();
-
+                println!("Received errorcode from child");
                 if res[0] > 0 {
                     exit_code = res[0] as i32;
                 }

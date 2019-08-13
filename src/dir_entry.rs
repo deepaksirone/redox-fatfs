@@ -1538,6 +1538,7 @@ impl LongNameGen {
 
 /// Taken from rust-fatfs: https://github.com/rafalh/rust-fatfs
 fn split_path(path: &str) -> (&str, Option<&str>) {
+    println!("Splitting path : {:?}", path);
     let mut path_split = path.trim_matches('/').splitn(2, "/");
     let comp = path_split.next().unwrap();
     let rest_opt = path_split.next();
@@ -1545,6 +1546,7 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
 }
 
 fn rsplit_path(path: &str) -> (&str, Option<&str>) {
+    println!("Rsplitting path : {:?}", path);
     let mut path_split = path.trim_matches('/').rsplitn(2, "/");
     let comp = path_split.next().unwrap();
     let rest_opt = path_split.next();
