@@ -247,7 +247,7 @@ fn main() {
                 0
             }
         },
-        None => {gid
+        None => {
             println!("redox-fatfs: no uid provided, defaulting to 0");
             0
         }
