@@ -12,6 +12,10 @@ use super::result;
 
 use super::scheme::{Fmaps};
 
+pub const MODE_TYPE: u16 = 0xF000;
+pub const MODE_FILE: u16 = 0x8000;
+pub const MODE_DIR: u16 = 0x4000;
+pub const MODE_SYMLINK: u16 = 0xA000;
 
 pub trait Resource<D: Read + Write + Seek> {
     //fn start_cluster(&self) -> u64;
@@ -153,7 +157,7 @@ impl<D: Read + Write + Seek> Resource<D> for DirResource {
         *stat = Stat {
             st_dev: 0, // TODO
             st_ino: self.dir.first_cluster.cluster_number,
-            st_mode: self.mode.unwrap_or(0o777), //TODO
+            st_mode: MODE_DIR | self.mode.unwrap_or(0o777), //TODO
             st_nlink: 1,
             st_uid: self.uid.unwrap_or(0),
             st_gid: self.gid.unwrap_or(0),
@@ -325,7 +329,7 @@ impl<D: Read + Write + Seek> Resource<D> for FileResource {
         *stat = Stat {
             st_dev: 0, // TODO
             st_ino: 0,
-            st_mode: self.mode.unwrap_or(0o755),
+            st_mode: MODE_FILE | self.mode.unwrap_or(0o777),
             st_nlink: 1,
             st_uid: self.uid.unwrap_or(0),
             st_gid: self.gid.unwrap_or(0),
