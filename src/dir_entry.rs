@@ -304,10 +304,10 @@ impl Dir {
     }
 
 
-    pub fn remove<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<()> {
+    pub fn remove<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>, remove_clusters: bool) -> Result<()> {
         let (name, rest) = split_path(path);
         if let Some(r) = rest {
-            return self.find_entry(name, Some(true), None, fs)?.to_dir().remove(r, fs);
+            return self.find_entry(name, Some(true), None, fs)?.to_dir().remove(r, fs, remove_clusters);
         }
 
         let e = self.find_entry(name, None, None, fs)?;
@@ -315,7 +315,7 @@ impl Dir {
             return Err(Error::new(ErrorKind::Other, "Directory not empty"));
         }
 
-        if e.first_cluster().cluster_number >= 2 {
+        if e.first_cluster().cluster_number >= 2 && remove_clusters {
             deallocate_cluster_chain(fs, e.first_cluster())?
         }
 
@@ -378,7 +378,7 @@ impl Dir {
                 }
             }
         };*/
-
+        println!("Renaming src_entry: {:?} to dest_path: {:?}", src_entry, dst_path);
         let (dst_name, dst_dir_path) = rsplit_path(dst_path);
 
 
@@ -395,31 +395,40 @@ impl Dir {
             }
         };
 
+        println!("Dst dir entry: {:?}", dst_dir);
         let parent_dir_path = src_entry.dir_path();
+        println!("Parent dir path: {:?}", parent_dir_path);
         let src_dir = match Self::get_parent(parent_dir_path.as_str(), fs) {
             Ok(Some(d)) => d,
             _ => return Err(Error::new(ErrorKind::NotFound, "Src directory not found"))
         };
 
+        println!("src dir entry: {:?}", src_dir);
         // Ensures src and dst are of the same type
         let dir_ent_updated  = match dst_dir.check_existence(dst_name, Some(src_entry.is_dir()), fs)? {
             DirEntryOrShortName::DirEntry(e) => {
                 let s_name = e.short_name_raw();
-                dst_dir.remove(dst_name, fs)?;
+                dst_dir.remove(dst_name, fs, true)?;
+                println!("Removing {:?} from dst_dir: {:?}", dst_name, dst_dir);
                 match e {
                     DirEntry::File(f) | DirEntry::VolID(f) => {
                         let short_entry = src_entry.short_dir_entry().unwrap();
+                        println!("Source Short Dir Entry: {:?}", short_entry);
                         //TODO: Modification time
-                        let dirent= dst_dir.create_dir_entries(f.fname.as_str(), &s_name, Some(short_entry), short_entry.file_attrs, fs)?;
-                        src_dir.remove(src_entry.name().as_str(), fs)?;
+                        src_dir.remove(src_entry.name().as_str(), fs, false)?;
+                        println!("Removing {:?} from src_dir: {:?}", src_entry.name(), src_dir);
+                        let dirent= dst_dir.create_dir_entries(dst_name, &s_name, Some(short_entry), short_entry.file_attrs, fs)?;
+                        println!("Final Short Dir Entry: {:?}", dirent.short_dir_entry());
                         dirent
 
                     },
                     DirEntry::Dir(d) => {
                         let short_entry = src_entry.short_dir_entry();
                         if let Some(se) = short_entry {
-                            let dirent = dst_dir.create_dir_entries(d.dir_name.as_str(), &s_name, Some(se), se.file_attrs, fs)?;
-                            src_dir.remove(src_entry.name().as_str(), fs)?;
+                            src_dir.remove(src_entry.name().as_str(), fs, false)?;
+                            println!("Removing {:?} from src_dir: {:?}", src_entry.name(), src_dir);
+                            let dirent = dst_dir.create_dir_entries(dst_name, &s_name, Some(se), se.file_attrs, fs)?;
+                            println!("Final Short Dir Entry: {:?}", dirent.short_dir_entry());
                             dirent
                         }
                         else {
@@ -438,8 +447,10 @@ impl Dir {
                 let short_entry = src_entry.short_dir_entry();
                 if let Some(se) = short_entry {
                     valid_long_name(dst_name)?;
+                    src_dir.remove(src_entry.name().as_str(), fs, false)?;
+                    println!("Removing {:?} from src_dir: {:?}", src_entry.name(), src_dir);
                     let dirent = dst_dir.create_dir_entries(dst_name, &s, Some(se), se.file_attrs, fs)?;
-                    src_dir.remove(src_entry.name().as_str(), fs)?;
+                    println!("Final Short Dir Entry: {:?}", dirent.short_dir_entry());
                     dirent
                 }
                 else {
@@ -1543,6 +1554,7 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     let mut path_split = path.trim_matches('/').splitn(2, "/");
     let comp = path_split.next().unwrap_or("");
     let rest_opt = path_split.next();
+    println!("Split Result: {:?}", (comp, rest_opt));
     (comp, rest_opt)
 }
 
@@ -1551,6 +1563,7 @@ fn rsplit_path(path: &str) -> (&str, Option<&str>) {
     let mut path_split = path.trim_matches('/').rsplitn(2, "/");
     let comp = path_split.next().unwrap_or("");
     let rest_opt = path_split.next();
+    println!("Rsplit Result: {:?}", (comp, rest_opt));
     (comp, rest_opt)
 }
 

@@ -262,7 +262,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
             if child.is_dir() {
                 let root_dir = fs.root_dir();
-                from(root_dir.remove(path, &mut fs).map(|_x| 0 as usize))
+                from(root_dir.remove(path, &mut fs, true).map(|_x| 0 as usize))
             } else {
                     Err(Error::new(ENOTDIR))
             }
@@ -288,7 +288,7 @@ impl<D: Read + Write + Seek> Scheme for FileScheme<D> {
 
                 if ! child.is_dir() {
                     let root_dir = fs.root_dir();
-                    from(root_dir.remove(path, &mut fs).map(|_r| 0 as usize))
+                    from(root_dir.remove(path, &mut fs, true).map(|_r| 0 as usize))
                 } else {
                     Err(Error::new(EISDIR))
                 }
