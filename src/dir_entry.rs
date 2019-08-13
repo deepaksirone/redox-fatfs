@@ -340,7 +340,7 @@ impl Dir {
 
     pub fn get_entry<D: Read + Write + Seek>(&self, path: &str, fs: &mut FileSystem<D>) -> Result<DirEntry> {
         let (name, rest) = split_path(path);
-
+        println!("Split path after get_entry invocation");
         match rest {
             Some(r) => {
                 let e = self.find_entry(name, Some(true), None, fs)?;
