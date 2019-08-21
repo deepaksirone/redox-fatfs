@@ -6,6 +6,7 @@ extern crate log;
 
 extern crate syscall;
 extern crate spin;
+extern crate hex;
 
 extern crate byteorder;
 #[macro_use]

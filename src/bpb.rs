@@ -279,6 +279,15 @@ impl BiosParameterBlock {
         self.total_sectors_16 == 0
     }
 
+    pub fn get_serial(&self) -> u32 {
+        match self.fat_type {
+            FATType::FAT12(b) | FATType::FAT16(b) => {
+                b.vol_id
+            },
+            FATType::FAT32(b) => b.vol_id
+        }
+    }
+
 }
 
 #[allow(dead_code)]
@@ -301,7 +310,7 @@ impl fmt::Debug for BiosParameterBlockFAT32 {
                 bk_boot_sec: {:?},
                 drv_num: {:?},
                 boot_sig: {:?},
-                vol_id: {:?}
+                vol_id: {:X}
                  }}", self.fat_size, self.ext_flags,self.fs_ver, self.root_cluster, self.fs_info,
                 self.bk_boot_sec, self.drv_num, self.boot_sig, self.vol_id)
     }
@@ -314,7 +323,7 @@ impl fmt::Debug for BiosParameterBlockLegacy {
             drive_num: {},
             reserved: {},
             boot_sig: {},
-            vol_id: {},
+            vol_id: {:X},
             file_sys_type: {}
         }}", self.drive_num, self.reserved, self.boot_sig, self.vol_id, self.file_sys_type)
     }

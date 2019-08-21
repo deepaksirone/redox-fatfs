@@ -221,7 +221,7 @@ pub struct FileSystem<D: Read + Write + Seek> {
 
 impl<D: Read + Write + Seek> FileSystem<D> {
 
-    pub fn from_offset(partition_offset: u64, mut disk: D) -> Result<FileSystem<D>> {
+    pub fn from_offset(partition_offset: u64, mut disk: D, serial: Option<u32>) -> Result<FileSystem<D>> {
         disk.seek(SeekFrom::Start((partition_offset / BLOCK_SIZE) * BLOCK_SIZE))?;
         let bpb = BiosParameterBlock::populate(&mut disk)?;
 
@@ -233,6 +233,11 @@ impl<D: Read + Write + Seek> FileSystem<D> {
             _ => FsInfo::default()
         };
 
+        if let Some(ser) = serial {
+            if ser != bpb.get_serial() {
+                return Err(Error::new(ErrorKind::InvalidData, "Incorrect Serial Number"))
+            }
+        }
 
         let root_dir_sec = ((bpb.root_entries_cnt as u64 * 32) + (bpb.bytes_per_sector as u64 - 1)) / (bpb.bytes_per_sector as u64);
         let fat_sz = if bpb.fat_size_16 != 0 { bpb.fat_size_16 as u64}

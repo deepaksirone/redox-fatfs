@@ -7,16 +7,18 @@ extern crate libc;
 extern crate syscall;
 
 extern crate redox_fatfs;
-
+extern crate byteorder;
 //extern crate uuid;
 
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use std::io::{Read, Write};
+use std::io::{Read, Write, Cursor};
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use byteorder::{BigEndian, ReadBytesExt};
 
 //use uuid::Uuid;
 use redox_fatfs::mount;
@@ -83,7 +85,7 @@ fn capability_mode() {
 
 
 fn usage() {
-    println!("redox-fatfs [mountpoint_base] --uid [uid] --gid [gid] --mode [mode]");
+    println!("redox-fatfs [mountpoint_base] --serial [serial] --uid [uid] --gid [gid] --mode [mode]");
 }
 
 /*
@@ -136,12 +138,12 @@ fn disk_paths(paths: &mut Vec<String>) {
     }
 }
 
-fn daemon(path: &String, mountpoint: &str, mut write: File, uid: u32, gid: u32, mode: u16) -> ! {
+fn daemon(path: &String, mountpoint: &str, mut write: File, uid: u32, gid: u32, mode: u16, serial: Option<u32>) -> ! {
     setsig();
 
     println!("redox-fatfs: opening {}", path);
     match OpenOptions::new().read(true).write(true).open(path) {
-            Ok(disk) => match redox_fatfs::FileSystem::from_offset(0, disk) {
+            Ok(disk) => match redox_fatfs::FileSystem::from_offset(0, disk, serial) {
                 Ok(filesystem) => {
                     println!("redox-fatfs: opened filesystem on {}", path);
 
@@ -224,6 +226,52 @@ fn main() {
         }
     };
 
+    let serial = match args.next() {
+        Some(arg) => {
+            if arg == "--serial" {
+                match args.next() {
+                    Some(ser) => {
+                        if &ser[..2] == "0x" {
+                            match hex::decode(&ser[2..]) {
+                                Ok(val) => {
+                                    let mut cursor = Cursor::new(val);
+                                    cursor.read_u32::<BigEndian>().ok()
+                                },
+                                Err(e) => {
+                                    println!("Invalid serial number: '{}' : {:?}", ser, e);
+                                    usage();
+                                    process::exit(1);
+                                }
+                            }
+                        } else {
+                            match hex::decode(&ser) {
+                                Ok(val) => {
+                                    let mut cursor = Cursor::new(val);
+                                    cursor.read_u32::<BigEndian>().ok()
+                                },
+                                Err(e) => {
+                                    println!("redox-fatfs: Invalid serial number: '{}' : {:?}", ser, e);
+                                    usage();
+                                    process::exit(1);
+                                }
+                            }
+                        }
+                    },
+                    None => {
+                        println!("redox-fatfs: No serial number provided, defaulting to all");
+                        None
+                    }
+                }
+        }
+            else {
+                println!("redox-fatfs: No serial number provided, defaulting to all");
+                None
+            }
+        },
+        None => None
+
+    };
+
     let uid = match args.next() {
         Some(arg) => {
             if arg == "--uid" {
@@ -295,7 +343,7 @@ fn main() {
                         }
                     },
                     None => {
-                        println!("redoxfatfs: no mode provided, defaulting to 0o777");
+                        println!("redox-fatfs: no mode provided, defaulting to 0o777");
                         0o777
                     }
                 };
@@ -328,13 +376,13 @@ fn main() {
                 let id = MOUNT_COUNT.fetch_add(1, Ordering::SeqCst).to_string();
                 let mut mount_point = mountpoint_base.clone();
                 mount_point.push_str(&id);
-                daemon(&path, &mount_point, write, uid, gid, mode);
+                daemon(&path, &mount_point, write, uid, gid, mode, serial);
             } else if pid > 0 {
                 drop(write);
 
                 let mut res = [0];
                 read.read(&mut res).unwrap();
-                println!("Received errorcode from child");
+                println!("Received errorcode {:?} from child", res[0]);
                 if res[0] > 0 {
                     exit_code = res[0] as i32;
                 }
