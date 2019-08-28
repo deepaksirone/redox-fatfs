@@ -142,6 +142,7 @@ fn daemon(path: &String, mountpoint: &str, mut write: File, uid: u32, gid: u32, 
     setsig();
 
     println!("redox-fatfs: opening {}", path);
+    println!("redox-fatfs: using serial number: {:?}", serial);
     match OpenOptions::new().read(true).write(true).open(path) {
             Ok(disk) => match redox_fatfs::FileSystem::from_offset(0, disk, serial) {
                 Ok(filesystem) => {
@@ -271,6 +272,7 @@ fn main() {
         None => None
 
     };
+
 
     let uid = match args.next() {
         Some(arg) => {
