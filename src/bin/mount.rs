@@ -235,7 +235,24 @@ fn main() {
                         if &ser[..2] == "0x" {
                             match hex::decode(&ser[2..]) {
                                 Ok(val) => {
-                                    let mut cursor = Cursor::new(val);
+                                    if val.len() > 4 {
+                                        println!("Serial number too long");
+                                        usage();
+                                        process::exit(1);
+                                    }
+
+                                    let new_val = if val.len() < 4 {
+                                        let diff = 4 - val.len();
+                                        let mut nv = vec![0; diff];
+                                        for r in val {
+                                            nv.push(r);
+                                        }
+                                        nv
+                                    } else {
+                                        val
+                                    };
+
+                                    let mut cursor = Cursor::new(new_val);
                                     cursor.read_u32::<BigEndian>().ok()
                                 },
                                 Err(e) => {
@@ -247,7 +264,24 @@ fn main() {
                         } else {
                             match hex::decode(&ser) {
                                 Ok(val) => {
-                                    let mut cursor = Cursor::new(val);
+                                    if val.len() > 4 {
+                                        println!("Serial number too long");
+                                        usage();
+                                        process::exit(1);
+                                    }
+
+                                    let new_val = if val.len() < 4 {
+                                        let diff = 4 - val.len();
+                                        let mut nv = vec![0; diff];
+                                        for r in val {
+                                            nv.push(r);
+                                        }
+                                        nv
+                                    } else {
+                                        val
+                                    };
+
+                                    let mut cursor = Cursor::new(new_val);
                                     cursor.read_u32::<BigEndian>().ok()
                                 },
                                 Err(e) => {
