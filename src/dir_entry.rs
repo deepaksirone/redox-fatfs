@@ -411,7 +411,7 @@ impl Dir {
                 dst_dir.remove(dst_name, fs, true)?;
                 println!("Removing {:?} from dst_dir: {:?}", dst_name, dst_dir);
                 match e {
-                    DirEntry::File(f) | DirEntry::VolID(f) => {
+                    DirEntry::File(_) | DirEntry::VolID(_) => {
                         let short_entry = src_entry.short_dir_entry().unwrap();
                         println!("Source Short Dir Entry: {:?}", short_entry);
                         //TODO: Modification time
@@ -422,7 +422,7 @@ impl Dir {
                         dirent
 
                     },
-                    DirEntry::Dir(d) => {
+                    DirEntry::Dir(_) => {
                         let short_entry = src_entry.short_dir_entry();
                         if let Some(se) = short_entry {
                             src_dir.remove(src_entry.name().as_str(), fs, false)?;

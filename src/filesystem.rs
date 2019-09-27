@@ -98,7 +98,7 @@ impl FsInfo {
         let mut cursor = Cursor::new(block_vec);
         let mut fsinfo = FsInfo::default();
 
-        disk.seek(SeekFrom::Start((offset / BLOCK_SIZE) * BLOCK_SIZE));
+        disk.seek(SeekFrom::Start((offset / BLOCK_SIZE) * BLOCK_SIZE))?;
         let read = disk.read(cursor.get_mut())?;
         println!("Read {:?} bytes into block vec", read);
         cursor.seek(SeekFrom::Start(offset % BLOCK_SIZE))?;
@@ -298,7 +298,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         let mut cursor = Cursor::new(block_buf);
         let mut start = 0;
 
-        for i in 0..num_blocks {
+        for _i in 0..num_blocks {
             self.seek_to_block(offset)?;
             self.disk.borrow_mut().read_exact(cursor.get_mut())?;
             cursor.seek(SeekFrom::Start(blk_offset))?;
@@ -346,7 +346,7 @@ impl<D: Read + Write + Seek> FileSystem<D> {
         let mut cursor = Cursor::new(block_buf);
         let mut start = 0;
 
-        for i in 0..num_blocks {
+        for _i in 0..num_blocks {
             self.seek_to_block(offset)?;
             self.disk.borrow_mut().read_exact(cursor.get_mut())?;
             cursor.seek(SeekFrom::Start(blk_offset))?;

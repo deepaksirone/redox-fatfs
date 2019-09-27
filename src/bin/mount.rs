@@ -12,7 +12,6 @@ extern crate byteorder;
 
 use std::env;
 use std::fs::{File, OpenOptions};
-use std::path::Path;
 use std::io::{Read, Write, Cursor};
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::process;

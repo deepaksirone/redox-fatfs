@@ -6,7 +6,6 @@ use filesystem::{FileSystem, Cluster, get_block_buffer};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub const RESERVED_CLUSTERS: u64 = 2;
-use BLOCK_SIZE;
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum FatEntry {
@@ -389,7 +388,7 @@ pub fn set_entry<D: Read + Write + Seek>(fs: &mut FileSystem<D>, cluster: Cluste
                 cursor.write_u32::<LittleEndian>(raw_val)?;
 
                 fs.seek_to_block(f_offset)?;
-                fs.disk.borrow_mut().write(cursor.get_ref());
+                fs.disk.borrow_mut().write(cursor.get_ref())?;
             }
             Ok(())
         }

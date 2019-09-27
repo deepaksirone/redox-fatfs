@@ -259,7 +259,7 @@ impl BiosParameterBlock {
         let root_sectors = ((self.root_entries_cnt as u32 * 32) + (self.bytes_per_sector as u32) - 1) / (self.bytes_per_sector as u32);
         let fat_sz = if self.fat_size_16 != 0 { self.fat_size_16 as u32 } else { bpb32.fat_size };
         let tot_sec = if self.total_sectors_16 != 0 { self.total_sectors_16 as u32 } else { self.total_sectors_32 };
-        let first_data_sec = ((self.rsvd_sec_cnt as u32) + (self.num_fats as u32) * fat_sz + root_sectors);
+        let first_data_sec = (self.rsvd_sec_cnt as u32) + (self.num_fats as u32) * fat_sz + root_sectors;
         let data_sec = tot_sec - ((self.rsvd_sec_cnt as u32) + (self.num_fats as u32) * fat_sz + root_sectors);
 
         let count_clusters = data_sec / (self.sectors_per_cluster as u32);
